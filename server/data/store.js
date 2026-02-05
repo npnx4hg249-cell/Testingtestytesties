@@ -1,5 +1,5 @@
 /**
- * Simple JSON-based data store for CC Shifter
+ * Simple JSON-based data store for ICES-Shifter
  *
  * In production, this would be replaced with a proper database.
  * This file provides in-memory storage with file persistence.
@@ -267,7 +267,12 @@ export function createSchedule(scheduleData) {
     data: scheduleData.data, // The actual schedule object
     stats: scheduleData.stats || null,
     createdBy: scheduleData.createdBy,
-    publishedAt: null
+    publishedAt: null,
+    archivedAt: null,
+    isPartial: scheduleData.isPartial || false,
+    generationErrors: scheduleData.generationErrors || [],
+    validationErrors: scheduleData.validationErrors || [],
+    editHistory: []
   });
 }
 

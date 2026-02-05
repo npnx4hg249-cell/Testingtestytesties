@@ -1,0 +1,47 @@
+{
+  "version": "2.0.0",
+  "name": "ICES-Shifter",
+  "description": "Intelligent Constraint-based Engineering Scheduler",
+  "releaseDate": "2026-02-05",
+  "changelog": [
+    {
+      "version": "2.0.0",
+      "date": "2026-02-05",
+      "changes": [
+        "Renamed application to ICES-Shifter",
+        "Added version management system",
+        "Added auto-update feature from GitHub",
+        "Added Excel import/export for engineers",
+        "Added calendar view for engineer unavailability",
+        "Added shift plan preview (including failed schedules)",
+        "Added 24-month schedule archiving",
+        "Added manual shift plan editing",
+        "Added admin-as-engineer functionality",
+        "Added email notification system",
+        "Added engineer view for shift plans",
+        "Added shift consistency rule in generation engine",
+        "Added CSV bulk upload and weekend preferences (from v1.1.0)"
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "date": "2026-02-05",
+      "changes": [
+        "Added CSV bulk upload for engineers",
+        "Added weekend-specific shift preferences",
+        "Added duplicate engineer functionality"
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-02-01",
+      "changes": [
+        "Initial release",
+        "Constraint solver for shift scheduling",
+        "German holiday support",
+        "Request management system",
+        "Docker containerization"
+      ]
+    }
+  ]
+}

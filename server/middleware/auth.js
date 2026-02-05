@@ -1,14 +1,14 @@
 /**
- * Authentication Middleware
+ * Authentication Middleware for ICES-Shifter
  *
- * JWT-based authentication for the CC Shifter API.
+ * JWT-based authentication for the ICES-Shifter API.
  */
 
 import jwt from 'jsonwebtoken';
 import { getById } from '../data/store.js';
 
 // Secret key for JWT (in production, use environment variable)
-const JWT_SECRET = process.env.JWT_SECRET || 'cc-shifter-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'ices-shifter-secret-key-change-in-production';
 const JWT_EXPIRES_IN = '24h';
 
 /**

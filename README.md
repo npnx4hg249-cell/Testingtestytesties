@@ -1,10 +1,13 @@
-# CC Shifter - Shift Planning Application
+# ICES-Shifter - Intelligent Constraint-based Engineering Scheduler
 
 A comprehensive shift planning application for engineering teams of 19-25 engineers. Built with Node.js/Express backend and React frontend.
+
+**Version 2.0.0**
 
 ## Table of Contents
 
 - [Features](#features)
+- [What's New in v2.0](#whats-new-in-v20)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Docker Deployment](#docker-deployment)
@@ -15,6 +18,7 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 - [API Reference](#api-reference)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
+- [Admin Features](#admin-features)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
@@ -25,16 +29,28 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 ### Core Scheduling
 - **Constraint-based schedule generation** using a constraint solver approach (not greedy heuristics)
 - Support for multiple shift types: Early, Morning, Late, Night
+- **Weekend-specific shift preferences** (WeekendEarly, WeekendMorning, WeekendLate, WeekendNight)
 - Different coverage requirements for weekdays vs weekends
 - Core engineers and Floaters (max 2) with different scheduling rules
 - Night shift continuity (2+ consecutive weeks)
+- **Shift consistency rule**: Early/Morning stay together, Late stays consistent, Night stays 2+ weeks
 - Adjacency rules to prevent invalid shift transitions
 
 ### Engineer Management
 - Engineer profiles with Tier classification (T1, T2, T3)
-- Shift preferences per engineer
-- Unavailability/vacation tracking
+- Shift preferences per engineer (weekday and weekend)
+- **Calendar view for unavailability** (sick leave, vacation, personal days)
 - German state assignment for holiday calculation
+- **Bulk import via CSV and Excel**
+- **Export engineers to CSV/Excel**
+- **Duplicate/copy engineer** for easy creation
+
+### Schedule Management
+- **Schedule preview** (even for failed/incomplete generation)
+- **Manual shift editing** with validation
+- **24-month schedule archiving**
+- **Engineer view** (3 months back for engineers, full access for admins)
+- Email notifications on schedule publish
 
 ### Request System
 - **15-day minimum lead time** for all scheduling requests
@@ -45,11 +61,36 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 ### Schedule Generation Failures
 When the constraint solver cannot satisfy all rules, the system provides:
 - Detailed error messages explaining conflicts
-- **At least 3 recovery options**, such as:
-  - Relax coverage requirements
-  - Increase floater availability
-  - Flexible OFF days
-  - Manual schedule adjustment
+- **At least 3 recovery options**
+- **Partial schedule preview** for review
+- **Direct link to manual editing**
+
+### Admin Features
+- **Version management with semantic versioning**
+- **Auto-update from GitHub** (works in Docker)
+- **Update check scheduling** (hourly, 8-hourly, daily)
+- **Admin can mark themselves as engineer** to participate in scheduling
+- **Email notification configuration**
+- **User management** with notification preferences
+
+---
+
+## What's New in v2.0
+
+### Major Features
+1. **Renamed to ICES-Shifter** (Intelligent Constraint-based Engineering Scheduler)
+2. **Version Management** - Semantic versioning with changelog
+3. **Auto-Update from GitHub** - Check and apply updates from within the admin portal
+4. **Excel Import/Export** - Support for .xlsx files in addition to CSV
+5. **Unavailability Calendar** - Visual calendar to mark sick/vacation days (SAP-ready)
+6. **Schedule Preview** - View partial schedules even when generation fails
+7. **24-Month Archiving** - Historical schedule storage with role-based access
+8. **Manual Shift Editing** - Edit individual shifts with validation
+9. **Admin-as-Engineer** - Link admin/manager accounts to engineer profiles
+10. **Email Notifications** - Notify users when schedules change
+11. **Engineer Schedule View** - Engineers can view their schedules directly
+12. **Shift Consistency Rule** - Maintains shift type consistency week-to-week
+13. **Weekend Shift Preferences** - Separate preferences for weekend shifts
 
 ---
 
@@ -92,7 +133,7 @@ npm run dev
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd cc-shifter
+cd ices-shifter
 
 # Install server dependencies
 npm install
@@ -151,31 +192,6 @@ docker-compose down
 
 The application will be available at `http://localhost`
 
-### Build and Run Manually
-```bash
-# Build images
-docker build -t cc-shifter-api .
-docker build -t cc-shifter-web ./client
-
-# Create network
-docker network create cc-shifter-net
-
-# Run API
-docker run -d \
-  --name cc-shifter-api \
-  --network cc-shifter-net \
-  -v cc-shifter-data:/app/server/data/storage \
-  -e JWT_SECRET=your-secret-key \
-  cc-shifter-api
-
-# Run Web
-docker run -d \
-  --name cc-shifter-web \
-  --network cc-shifter-net \
-  -p 80:80 \
-  cc-shifter-web
-```
-
 ### Environment Variables
 
 | Variable | Default | Description |
@@ -183,6 +199,12 @@ docker run -d \
 | `PORT` | 3001 | API server port |
 | `NODE_ENV` | production | Environment mode |
 | `JWT_SECRET` | (default) | Secret for JWT tokens (**change in production!**) |
+| `SMTP_HOST` | - | SMTP server for email notifications |
+| `SMTP_PORT` | 587 | SMTP port |
+| `SMTP_USER` | - | SMTP username |
+| `SMTP_PASS` | - | SMTP password |
+| `SMTP_FROM` | - | From email address |
+| `SMTP_SECURE` | false | Use TLS |
 
 ### Data Persistence
 Data is stored in `/app/server/data/storage` inside the API container.
@@ -192,6 +214,8 @@ Data is stored in `/app/server/data/storage` inside the API container.
 -v /path/on/host:/app/server/data/storage
 ```
 
+**Note:** When using auto-update in Docker, user data is preserved because it's stored in a mounted volume.
+
 ---
 
 ## User Guide
@@ -200,55 +224,50 @@ Data is stored in `/app/server/data/storage` inside the API container.
 
 | Role | Permissions |
 |------|-------------|
-| **Admin** | Full access: manage engineers, schedules, approve requests, system settings |
+| **Admin** | Full access: manage engineers, schedules, approve requests, system settings, auto-update |
 | **Manager** | Manage engineers, generate/publish schedules, approve/reject requests |
-| **Engineer** | View schedules, submit requests, update own preferences |
+| **Engineer** | View schedules (3 months back), submit requests, update own preferences |
 
 ### Workflow
 
 1. **Setup Engineers** (Admin/Manager)
    - Add all team members with name, email, tier
    - Assign German state for holiday calculation
-   - Set shift preferences (which shifts they can work)
+   - Set shift preferences (weekday AND weekend)
    - Designate floaters (max 2)
+   - Import via CSV/Excel for bulk setup
 
-2. **Engineer Requests** (Engineers)
+2. **Mark Unavailability** (Admin/Manager/Engineer)
+   - Use calendar view to mark sick/vacation days
+   - Select date range and unavailability type
+   - Future: Sync with SAP WFM
+
+3. **Engineer Requests** (Engineers)
    - Submit time-off requests (minimum 15-day lead time)
    - Request shift changes
    - Update shift preferences
 
-3. **Manager Review** (Manager/Admin)
+4. **Manager Review** (Manager/Admin)
    - Review pending requests as approval cards
    - Approve or reject with notes
    - Approved requests auto-apply to schedules
 
-4. **Generate Schedule** (Manager/Admin)
+5. **Generate Schedule** (Manager/Admin)
    - Select target month
    - Run constraint solver
-   - If failures occur, choose recovery option or edit manually
+   - If failures occur:
+     - View partial schedule preview
+     - Choose recovery option OR
+     - Edit manually
 
-5. **Publish Schedule** (Manager/Admin)
+6. **Publish Schedule** (Manager/Admin)
    - Review generated schedule
    - Publish to make visible to all engineers
+   - Email notifications sent automatically
 
-### Color Coding
-
-#### Engineer Tiers
-| Tier | Color | Hex |
-|------|-------|-----|
-| T1 | Pink | `#d5a6bd` |
-| T2 | Light Green | `#b6d7a7` |
-| T3 | Mint | `#b7e1cd` |
-
-#### Shifts
-| Shift | Color | Hex | Text |
-|-------|-------|-----|------|
-| Early | Gold | `#f1c232` | Black |
-| Morning | Yellow | `#ffff00` | Black |
-| Late | Blue | `#6fa8dc` | White |
-| Night | Dark Blue | `#1155cc` | White |
-| OFF | Purple | `#5a3286` | White |
-| Unavailable | Green | `#b6d7a8` | Black |
+7. **View Schedule** (All Users)
+   - Engineers see "My Schedule" with their shifts highlighted
+   - Admins/Managers see full management view
 
 ---
 
@@ -296,10 +315,18 @@ Data is stored in `/app/server/data/storage` inside the API container.
    - Prefer entire month when possible
 
 8. **Adjacency Rules** (Forbidden Transitions)
-   - Night → Early ❌
-   - Night → Morning ❌
-   - Early → Night ❌
-   - Morning → Night ❌
+   - Night → Early (forbidden)
+   - Night → Morning (forbidden)
+   - Early → Night (forbidden)
+   - Morning → Night (forbidden)
+
+### Soft Constraints (Preferences)
+
+9. **Shift Consistency** (NEW in v2.0)
+   - Early/Morning shifts stay together week-to-week
+   - Late shifts stay consistent week-to-week
+   - Night shifts stay consistent for 2+ weeks
+   - Helps maintain work-life balance and sleep patterns
 
 ---
 
@@ -320,6 +347,14 @@ Data is stored in `/app/server/data/storage` inside the API container.
 | Morning | 10:00 | 18:30 | 8.5 hours |
 | Late | 15:00 | 22:30 | 7.5 hours |
 | Night | 23:00 | 07:30 | 8.5 hours |
+
+### Shift Preferences
+Engineers can set separate preferences for weekday and weekend shifts:
+
+**Weekday:** Early, Morning, Late, Night
+**Weekend:** WeekendEarly, WeekendMorning, WeekendLate, WeekendNight
+
+This allows, for example, an engineer to work Morning during the week but only Night on weekends.
 
 ---
 
@@ -375,6 +410,23 @@ Data is stored in `/app/server/data/storage` inside the API container.
 
 Base URL: `http://localhost:3001/api`
 
+### System Endpoints (NEW in v2.0)
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| GET | `/system/version` | Get current version | No |
+| GET | `/system/version/full` | Get version with changelog | Admin |
+| GET | `/system/update-status` | Get update status | Admin |
+| POST | `/system/check-update` | Check for updates | Admin |
+| POST | `/system/configure-update-check` | Set check interval | Admin |
+| POST | `/system/apply-update` | Apply available update | Admin |
+| GET | `/system/settings` | Get system settings | Admin |
+| PUT | `/system/settings` | Update settings | Admin |
+| GET | `/system/email-config` | Get email config status | Admin |
+| GET | `/system/users` | List all users | Admin |
+| PUT | `/system/users/:id/notifications` | Update email prefs | Yes |
+| PUT | `/system/users/:id/engineer-link` | Link user to engineer | Admin |
+
 ### Authentication
 
 | Method | Endpoint | Description | Auth |
@@ -383,27 +435,6 @@ Base URL: `http://localhost:3001/api`
 | POST | `/auth/register` | Register new user | No |
 | GET | `/auth/me` | Get current user info | Yes |
 | POST | `/auth/change-password` | Change password | Yes |
-
-**Login Request:**
-```json
-{
-  "email": "admin@example.com",
-  "password": "admin123"
-}
-```
-
-**Login Response:**
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIs...",
-  "user": {
-    "id": "uuid",
-    "email": "admin@example.com",
-    "name": "Admin",
-    "role": "admin"
-  }
-}
-```
 
 ### Engineers
 
@@ -414,24 +445,23 @@ Base URL: `http://localhost:3001/api`
 | POST | `/engineers` | Create engineer | Manager |
 | PUT | `/engineers/:id` | Update engineer | Manager |
 | DELETE | `/engineers/:id` | Deactivate engineer | Manager |
+| POST | `/engineers/:id/duplicate` | Duplicate engineer | Manager |
 | PUT | `/engineers/:id/preferences` | Update shift preferences | Yes* |
 | PUT | `/engineers/:id/unavailable` | Update unavailable days | Yes* |
+| GET | `/engineers/:id/unavailable-dates` | Get unavailable dates (detailed) | Yes* |
+| POST | `/engineers/:id/unavailable-dates` | Add unavailable dates | Yes* |
+| DELETE | `/engineers/:id/unavailable-dates` | Remove unavailable dates | Yes* |
 | GET | `/engineers/:id/holidays` | Get holidays for engineer | Yes |
 | GET | `/engineers/states` | List German states | No |
+| POST | `/engineers/bulk-upload` | Bulk upload from CSV | Manager |
+| POST | `/engineers/bulk-upload-excel` | Bulk upload from Excel | Manager |
+| GET | `/engineers/export/csv` | Export engineers as CSV | Manager |
+| GET | `/engineers/export/excel` | Export engineers as Excel | Manager |
+| GET | `/engineers/csv-template` | Download CSV template | No |
+| GET | `/engineers/excel-template` | Download Excel template | No |
+| GET | `/engineers/shift-options` | Get shift preference options | No |
 
-*Engineers can update their own; managers can update any
-
-**Create Engineer Request:**
-```json
-{
-  "name": "Max Mueller",
-  "email": "max.mueller@example.com",
-  "tier": "T2",
-  "isFloater": false,
-  "state": "BY",
-  "preferences": ["Early", "Morning", "Late"]
-}
-```
+*Engineers can access their own; managers can access any
 
 ### Schedules
 
@@ -440,46 +470,16 @@ Base URL: `http://localhost:3001/api`
 | GET | `/schedules` | List all schedules | Yes |
 | GET | `/schedules/:id` | Get schedule by ID | Yes |
 | GET | `/schedules/month/:year/:month` | Get schedule for month | Yes |
+| GET | `/schedules/engineer-view/:year/:month` | Engineer schedule view | Yes |
+| GET | `/schedules/archived` | List archived schedules | Manager |
 | POST | `/schedules/generate` | Generate new schedule | Manager |
 | POST | `/schedules/generate-with-option` | Generate with recovery option | Manager |
-| PUT | `/schedules/:id` | Update schedule (manual edit) | Manager |
+| PUT | `/schedules/:id` | Update schedule (full data) | Manager |
+| PUT | `/schedules/:id/shift` | Update single shift | Manager |
 | POST | `/schedules/:id/publish` | Publish schedule | Manager |
+| POST | `/schedules/:id/archive` | Archive schedule | Manager |
 | GET | `/schedules/:id/export` | Export schedule data | Yes |
 | GET | `/schedules/holidays/:year/:month` | Get holidays for month | Yes |
-
-**Generate Schedule Request:**
-```json
-{
-  "year": 2024,
-  "month": 3
-}
-```
-
-**Generate Schedule Response (Success):**
-```json
-{
-  "success": true,
-  "schedule": { "id": "...", "month": "2024-03", "data": {...} },
-  "warnings": [],
-  "stats": {...}
-}
-```
-
-**Generate Schedule Response (Failure):**
-```json
-{
-  "success": false,
-  "errors": [
-    { "type": "coverage_failure", "message": "..." }
-  ],
-  "options": [
-    { "id": "relax_coverage", "title": "Relax Coverage Requirements", ... },
-    { "id": "increase_floater_hours", "title": "Increase Floater Availability", ... },
-    { "id": "manual_edit", "title": "Manual Schedule Adjustment", ... }
-  ],
-  "canManualEdit": true
-}
-```
 
 ### Requests
 
@@ -496,44 +496,24 @@ Base URL: `http://localhost:3001/api`
 
 *Only own pending requests
 
-**Create Time Off Request:**
-```json
-{
-  "type": "time_off",
-  "dates": ["2024-04-15", "2024-04-16", "2024-04-17"],
-  "reason": "Family vacation"
-}
-```
-
-**Create Shift Change Request:**
-```json
-{
-  "type": "shift_change",
-  "dates": ["2024-04-20"],
-  "details": {
-    "currentShift": "Early",
-    "requestedShift": "Late"
-  },
-  "reason": "Doctor appointment in the morning"
-}
-```
-
 ---
 
 ## Project Structure
 
 ```
-cc-shifter/
+ices-shifter/
 ├── server/
 │   ├── index.js                 # Express server entry point
 │   ├── routes/
 │   │   ├── auth.js              # Authentication endpoints
 │   │   ├── engineers.js         # Engineer management
 │   │   ├── schedules.js         # Schedule generation & management
-│   │   └── requests.js          # Request handling
+│   │   ├── requests.js          # Request handling
+│   │   └── system.js            # System/admin endpoints (NEW)
 │   ├── services/
 │   │   ├── constraintSolver.js  # Core scheduling algorithm
-│   │   └── germanHolidays.js    # Holiday calculations
+│   │   ├── germanHolidays.js    # Holiday calculations
+│   │   └── emailService.js      # Email notifications (NEW)
 │   ├── middleware/
 │   │   └── auth.js              # JWT authentication middleware
 │   └── data/
@@ -548,17 +528,22 @@ cc-shifter/
 │   │   │   ├── Login.jsx        # Login page
 │   │   │   ├── Dashboard.jsx    # Admin dashboard
 │   │   │   ├── Engineers.jsx    # Engineer management
+│   │   │   ├── EngineerUnavailability.jsx # Unavailability calendar (NEW)
 │   │   │   ├── Schedules.jsx    # Schedule generation
 │   │   │   ├── ScheduleView.jsx # Schedule grid view
+│   │   │   ├── ScheduleEdit.jsx # Manual schedule editing (NEW)
+│   │   │   ├── MySchedule.jsx   # Engineer schedule view (NEW)
 │   │   │   ├── Requests.jsx     # Admin request approval
 │   │   │   ├── MyRequests.jsx   # Engineer request submission
-│   │   │   └── Profile.jsx      # User profile & preferences
+│   │   │   ├── Profile.jsx      # User profile & preferences
+│   │   │   └── AdminSettings.jsx # Admin settings (NEW)
 │   │   └── services/
 │   │       └── api.js           # API client
 │   ├── index.html
 │   ├── vite.config.js
 │   ├── Dockerfile               # Client container (nginx)
 │   └── nginx.conf               # Nginx configuration
+├── version.json                 # Version information (NEW)
 ├── Dockerfile                   # API server container
 ├── docker-compose.yml           # Multi-container setup
 ├── package.json
@@ -566,6 +551,50 @@ cc-shifter/
 ├── seed-test-data.js            # Test data generator
 └── test-scheduler.js            # Standalone scheduler test
 ```
+
+---
+
+## Admin Features
+
+### Version Management
+
+The Admin Settings page (`/admin`) shows:
+- Current version number
+- Release date
+- Full changelog
+
+### Auto-Update
+
+ICES-Shifter can update itself from GitHub:
+
+1. Navigate to Admin Settings
+2. Click "Check for Updates"
+3. If an update is available, click "Apply Update"
+4. Restart the application
+
+**Note:** Auto-update works in both standalone and Docker deployments. User data is preserved because it's stored separately from the application code.
+
+### Update Check Scheduling
+
+Configure automatic update checks:
+- **Every Hour**: For critical environments
+- **Every 8 Hours**: Balanced approach
+- **Daily**: Recommended for most deployments
+- **Disabled**: Manual checks only
+
+### Email Notifications
+
+When configured (via SMTP environment variables):
+- Engineers receive notifications when schedules are published
+- Engineers receive notifications when their schedule changes
+- Users can opt-out via their profile
+
+### Admin as Engineer
+
+Admins/Managers can link their account to an engineer profile, allowing them to:
+- Appear in shift schedules
+- Submit their own time-off requests
+- View their personal schedule
 
 ---
 
@@ -577,18 +606,11 @@ cc-shifter/
 node test-scheduler.js
 ```
 
-This creates 23 sample engineers and attempts to generate a schedule, printing results to the console.
-
 ### Seed Test Data
 ```bash
 # Populate database with sample engineers and users
 node seed-test-data.js
 ```
-
-Creates:
-- 23 engineers (2 floaters, 21 core)
-- Admin, manager, and engineer user accounts
-- Sample shift preferences and state assignments
 
 ### Test Credentials After Seeding
 
@@ -606,17 +628,13 @@ Creates:
 
 **Port already in use**
 ```bash
-# Find process using port 3001
 lsof -i :3001
-# Kill it
 kill -9 <PID>
 ```
 
 **Docker build fails**
 ```bash
-# Clean Docker cache
 docker system prune -a
-# Rebuild
 docker-compose build --no-cache
 ```
 
@@ -624,20 +642,17 @@ docker-compose build --no-cache
 - Ensure you have at least 10 active engineers
 - Check that enough engineers can work Night shifts (minimum 2)
 - Verify engineers have shift preferences set
-- Review the error messages for specific constraint violations
+- Review the error messages and use the preview feature
 
 **Login issues**
 - Default admin: `admin@example.com` / `admin123`
 - JWT tokens expire after 24 hours
 - Clear browser localStorage and try again
 
-**Data not persisting (Docker)**
-```bash
-# Check volume
-docker volume ls
-# Inspect volume
-docker volume inspect cc-shifter-data
-```
+**Email notifications not working**
+- Check SMTP environment variables are set
+- Verify SMTP credentials are correct
+- Check email spam folder
 
 ### Logs
 
@@ -647,16 +662,13 @@ docker-compose logs -f api
 docker-compose logs -f web
 ```
 
-**Development logs:**
-Server logs appear in the terminal running `npm run dev`
-
 ---
 
 ## License
 
 MIT License
 
-Copyright (c) 2024
+Copyright (c) 2024-2026
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

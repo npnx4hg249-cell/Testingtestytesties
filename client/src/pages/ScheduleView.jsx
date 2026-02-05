@@ -86,17 +86,28 @@ function ScheduleView() {
             </span>
           </h1>
         </div>
-        {schedule.status === 'draft' && (
-          <button
-            className="btn btn-success"
-            onClick={async () => {
-              await api.publishSchedule(id);
-              loadSchedule();
-            }}
-          >
-            Publish Schedule
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 10 }}>
+          {schedule.status === 'draft' && (
+            <>
+              <Link
+                to={`/schedules/${id}/edit`}
+                className="btn btn-outline"
+                style={{ textDecoration: 'none' }}
+              >
+                Edit Schedule
+              </Link>
+              <button
+                className="btn btn-success"
+                onClick={async () => {
+                  await api.publishSchedule(id);
+                  loadSchedule();
+                }}
+              >
+                Publish Schedule
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Stats */}

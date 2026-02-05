@@ -1,6 +1,7 @@
 /**
- * CC Shifter - Main Server Entry Point
+ * ICES-Shifter - Main Server Entry Point
  *
+ * Intelligent Constraint-based Engineering Scheduler
  * A shift planning application for engineering teams.
  */
 
@@ -8,6 +9,7 @@ import express from 'express';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { readFileSync } from 'fs';
 import { initStore } from './data/store.js';
 
 // Import routes
@@ -15,6 +17,7 @@ import authRoutes from './routes/auth.js';
 import engineerRoutes from './routes/engineers.js';
 import scheduleRoutes from './routes/schedules.js';
 import requestRoutes from './routes/requests.js';
+import systemRoutes from './routes/system.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -42,22 +45,35 @@ app.use('/api/auth', authRoutes);
 app.use('/api/engineers', engineerRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/requests', requestRoutes);
+app.use('/api/system', systemRoutes);
+
+// Get version info
+function getVersion() {
+  try {
+    const versionFile = join(__dirname, '../version.json');
+    const data = JSON.parse(readFileSync(versionFile, 'utf-8'));
+    return data.version;
+  } catch {
+    return '2.0.0';
+  }
+}
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: getVersion(),
+    name: 'ICES-Shifter'
   });
 });
 
 // API documentation endpoint
 app.get('/api', (req, res) => {
   res.json({
-    name: 'CC Shifter API',
-    version: '1.0.0',
-    description: 'Shift planning application for engineering teams',
+    name: 'ICES-Shifter API',
+    version: getVersion(),
+    description: 'Intelligent Constraint-based Engineering Scheduler',
     endpoints: {
       auth: {
         'POST /api/auth/login': 'Login with email and password',
@@ -115,7 +131,7 @@ app.get('*', (req, res, next) => {
         <!DOCTYPE html>
         <html>
         <head>
-          <title>CC Shifter</title>
+          <title>ICES-Shifter</title>
           <style>
             body { font-family: system-ui, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
             h1 { color: #1155cc; }
@@ -124,7 +140,7 @@ app.get('*', (req, res, next) => {
           </style>
         </head>
         <body>
-          <h1>🗓️ CC Shifter API</h1>
+          <h1>🗓️ ICES-Shifter API</h1>
           <p>The API server is running. To use the full application:</p>
           <ol>
             <li>Build the client: <code>cd client && npm install && npm run build</code></li>
@@ -157,7 +173,7 @@ app.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
-║   🗓️  CC Shifter - Shift Planning Application             ║
+║   🗓️  ICES-Shifter - Shift Planning Application             ║
 ║                                                           ║
 ║   Server running at http://localhost:${PORT}                ║
 ║   API documentation at http://localhost:${PORT}/api         ║

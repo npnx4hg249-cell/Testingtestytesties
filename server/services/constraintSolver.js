@@ -1,8 +1,14 @@
 /**
- * CC Shifter Constraint Solver
+ * ICES-Shifter Constraint Solver
  *
+ * Intelligent Constraint-based Engineering Scheduler
  * Uses a constraint propagation and backtracking approach to generate
  * valid shift schedules. Implements all hard rules from the specification.
+ *
+ * Shift Consistency Rule:
+ * - Early/Morning shifts should stay together week-to-week
+ * - Late shifts should stay consistent week-to-week
+ * - Night shifts should stay consistent for at least 2 weeks
  */
 
 import {
@@ -77,6 +83,16 @@ const FORBIDDEN_TRANSITIONS = [
   [SHIFTS.EARLY, SHIFTS.NIGHT],
   [SHIFTS.MORNING, SHIFTS.NIGHT]
 ];
+
+// Shift consistency groups - shifts that should stay together
+const SHIFT_CONSISTENCY_GROUPS = {
+  day_early: [SHIFTS.EARLY, SHIFTS.MORNING],  // Early/Morning stay together
+  day_late: [SHIFTS.LATE],                     // Late stays consistent
+  night: [SHIFTS.NIGHT]                        // Night stays for 2+ weeks
+};
+
+// Minimum weeks for night shift consistency
+const NIGHT_CONSISTENCY_WEEKS = 2;
 
 /**
  * Main constraint solver class
@@ -246,6 +262,61 @@ export class ShiftScheduler {
     }
 
     return count;
+  }
+
+  /**
+   * Get an engineer's dominant shift type in a week
+   * Returns the shift group (day_early, day_late, night) they worked most
+   */
+  getDominantShiftGroup(schedule, engineerId, week) {
+    const shiftCounts = {
+      day_early: 0,
+      day_late: 0,
+      night: 0
+    };
+
+    for (const day of week) {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      const shift = schedule[engineerId]?.[dateStr];
+
+      if (SHIFT_CONSISTENCY_GROUPS.day_early.includes(shift)) {
+        shiftCounts.day_early++;
+      } else if (SHIFT_CONSISTENCY_GROUPS.day_late.includes(shift)) {
+        shiftCounts.day_late++;
+      } else if (SHIFT_CONSISTENCY_GROUPS.night.includes(shift)) {
+        shiftCounts.night++;
+      }
+    }
+
+    // Find the dominant group
+    let maxCount = 0;
+    let dominantGroup = null;
+    for (const [group, count] of Object.entries(shiftCounts)) {
+      if (count > maxCount) {
+        maxCount = count;
+        dominantGroup = group;
+      }
+    }
+
+    return { group: dominantGroup, count: maxCount };
+  }
+
+  /**
+   * Check if a shift matches the engineer's preferred consistency group
+   * This helps maintain week-to-week shift consistency
+   */
+  matchesConsistencyPreference(shift, preferredGroup) {
+    if (!preferredGroup) return true; // No preference established yet
+
+    if (preferredGroup === 'day_early') {
+      return SHIFT_CONSISTENCY_GROUPS.day_early.includes(shift);
+    } else if (preferredGroup === 'day_late') {
+      return SHIFT_CONSISTENCY_GROUPS.day_late.includes(shift);
+    } else if (preferredGroup === 'night') {
+      return SHIFT_CONSISTENCY_GROUPS.night.includes(shift);
+    }
+
+    return true;
   }
 
   /**
@@ -477,8 +548,33 @@ export class ShiftScheduler {
           return true;
         });
 
-        // Sort by who has worked least this week
+        // Sort by: 1) shift consistency preference, 2) who has worked least this week
         eligible.sort((a, b) => {
+          // Find current week index
+          const currentWeekIndex = weeks.findIndex(w =>
+            w.some(d => isSameDay(d, day))
+          );
+
+          // Get previous week's dominant shift group for consistency
+          let aPreferredGroup = null;
+          let bPreferredGroup = null;
+
+          if (currentWeekIndex > 0) {
+            const prevWeek = weeks[currentWeekIndex - 1];
+            aPreferredGroup = this.getDominantShiftGroup(schedule, a.id, prevWeek).group;
+            bPreferredGroup = this.getDominantShiftGroup(schedule, b.id, prevWeek).group;
+          }
+
+          // Check consistency match for this shift
+          const aMatchesConsistency = this.matchesConsistencyPreference(shift, aPreferredGroup) ? 0 : 1;
+          const bMatchesConsistency = this.matchesConsistencyPreference(shift, bPreferredGroup) ? 0 : 1;
+
+          // Prefer engineers whose previous week matches this shift type
+          if (aMatchesConsistency !== bMatchesConsistency) {
+            return aMatchesConsistency - bMatchesConsistency;
+          }
+
+          // Secondary sort: who has worked least this week
           const weekStart = startOfWeek(day, { weekStartsOn: 1 });
           const weekEnd = endOfWeek(day, { weekStartsOn: 1 });
           const weekDays = eachDayOfInterval({ start: weekStart, end: day });

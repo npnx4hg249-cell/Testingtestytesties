@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 
 // Shift definitions
@@ -130,6 +131,51 @@ function Engineers() {
     URL.revokeObjectURL(url);
   };
 
+  const handleExportCSV = async () => {
+    try {
+      const blob = await api.exportEngineersCSV();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'engineers-export.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      const blob = await api.exportEngineersExcel();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'engineers-export.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleExcelUpload = async (file) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target.result.split(',')[1];
+      try {
+        const response = await api.bulkUploadEngineersExcel(base64);
+        setCsvResults(response);
+        if (response.created > 0) {
+          await loadData();
+        }
+      } catch (err) {
+        setError(err.data?.error || err.message);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const openModal = (engineer = null) => {
     if (engineer) {
       setEditingEngineer(engineer);
@@ -246,9 +292,15 @@ function Engineers() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h1>Engineers</h1>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="btn btn-outline" onClick={handleExportCSV}>
+            Export CSV
+          </button>
+          <button className="btn btn-outline" onClick={handleExportExcel}>
+            Export Excel
+          </button>
           <button className="btn btn-outline" onClick={() => setShowCsvModal(true)}>
-            Upload CSV
+            Import
           </button>
           <button className="btn btn-primary" onClick={() => openModal()}>
             + Add Engineer
@@ -288,10 +340,13 @@ function Engineers() {
                 <td>{eng.state ? states.find(s => s.code === eng.state)?.name || eng.state : '-'}</td>
                 <td>{formatPreferences(eng.preferences)}</td>
                 <td>
-                  <div style={{ display: 'flex', gap: 5 }}>
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                     <button className="btn btn-outline" style={{ padding: '5px 10px' }} onClick={() => openModal(eng)} title="Edit">
                       Edit
                     </button>
+                    <Link to={`/engineers/${eng.id}/unavailability`} className="btn btn-outline" style={{ padding: '5px 10px', textDecoration: 'none' }} title="Calendar">
+                      Calendar
+                    </Link>
                     <button className="btn btn-outline" style={{ padding: '5px 10px' }} onClick={() => handleDuplicate(eng)} title="Duplicate">
                       Copy
                     </button>
@@ -493,62 +548,88 @@ function Engineers() {
         </div>
       )}
 
-      {/* CSV Upload Modal */}
+      {/* Import Modal (CSV/Excel) */}
       {showCsvModal && (
         <div className="modal-overlay" onClick={() => { setShowCsvModal(false); setCsvResults(null); setCsvData(''); }}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 700 }}>
             <div className="modal-header">
-              <h2>Bulk Upload Engineers (CSV)</h2>
+              <h2>Import Engineers (CSV/Excel)</h2>
               <button className="btn btn-outline" onClick={() => { setShowCsvModal(false); setCsvResults(null); setCsvData(''); }} style={{ padding: '5px 10px' }}>×</button>
             </div>
             <div className="modal-body">
               {!csvResults ? (
                 <>
                   <div className="alert alert-info" style={{ marginBottom: 15 }}>
-                    <strong>CSV Format:</strong> name, email, tier, isFloater, state, preferences
+                    <strong>Format:</strong> name, email, tier, isFloater, state, preferences
                     <br />
-                    <button
-                      type="button"
-                      className="btn btn-outline"
-                      style={{ marginTop: 10, padding: '5px 15px' }}
-                      onClick={downloadTemplate}
-                    >
-                      Download Template
-                    </button>
+                    <div style={{ marginTop: 10, display: 'flex', gap: 10 }}>
+                      <button
+                        type="button"
+                        className="btn btn-outline"
+                        style={{ padding: '5px 15px' }}
+                        onClick={downloadTemplate}
+                      >
+                        CSV Template
+                      </button>
+                      <a
+                        href="/api/engineers/excel-template"
+                        className="btn btn-outline"
+                        style={{ padding: '5px 15px', textDecoration: 'none' }}
+                      >
+                        Excel Template
+                      </a>
+                    </div>
                   </div>
 
                   <div className="form-group">
-                    <label>Paste CSV Data</label>
-                    <textarea
-                      value={csvData}
-                      onChange={e => setCsvData(e.target.value)}
-                      rows={10}
-                      placeholder={`name,email,tier,isFloater,state,preferences
-"John Doe",john@example.com,T2,false,BY,"Early,Morning,Late,Night"
-"Jane Smith",jane@example.com,T1,false,NW,"Early,Morning,WeekendMorning"`}
-                      style={{ fontFamily: 'monospace', fontSize: 12 }}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Or Upload CSV File</label>
+                    <label>Upload Excel File (.xlsx)</label>
                     <input
                       type="file"
-                      accept=".csv"
+                      accept=".xlsx,.xls"
                       onChange={e => {
                         const file = e.target.files[0];
                         if (file) {
-                          const reader = new FileReader();
-                          reader.onload = (event) => {
-                            setCsvData(event.target.result);
-                          };
-                          reader.readAsText(file);
+                          handleExcelUpload(file);
                         }
                       }}
                     />
                   </div>
 
-                  <div style={{ background: '#f5f5f5', padding: 15, borderRadius: 4, fontSize: 13 }}>
+                  <div style={{ borderTop: '1px solid #ddd', paddingTop: 15, marginTop: 15 }}>
+                    <p style={{ color: '#666', marginBottom: 10 }}>Or import via CSV:</p>
+                    <div className="form-group">
+                      <label>Paste CSV Data</label>
+                      <textarea
+                        value={csvData}
+                        onChange={e => setCsvData(e.target.value)}
+                        rows={8}
+                        placeholder={`name,email,tier,isFloater,state,preferences
+"John Doe",john@example.com,T2,false,BY,"Early,Morning,Late,Night"
+"Jane Smith",jane@example.com,T1,false,NW,"Early,Morning,WeekendMorning"`}
+                        style={{ fontFamily: 'monospace', fontSize: 12 }}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Or Upload CSV File</label>
+                      <input
+                        type="file"
+                        accept=".csv"
+                        onChange={e => {
+                          const file = e.target.files[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              setCsvData(event.target.result);
+                            };
+                            reader.readAsText(file);
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#f5f5f5', padding: 15, borderRadius: 4, fontSize: 13, marginTop: 15 }}>
                     <strong>Valid Preferences:</strong>
                     <br />
                     <em>Weekday:</em> Early, Morning, Late, Night

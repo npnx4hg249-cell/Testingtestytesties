@@ -198,6 +198,28 @@ function Schedules() {
                   Choose one of the following options to resolve the scheduling conflict:
                 </p>
 
+                {generationResult.partialSchedule && (
+                  <div style={{ marginBottom: 20 }}>
+                    <p>A partial schedule has been saved for review and manual editing:</p>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                      <Link
+                        to={`/schedules/${generationResult.partialSchedule.id}`}
+                        className="btn btn-outline"
+                        style={{ textDecoration: 'none' }}
+                      >
+                        View Preview
+                      </Link>
+                      <Link
+                        to={`/schedules/${generationResult.partialSchedule.id}/edit`}
+                        className="btn btn-primary"
+                        style={{ textDecoration: 'none' }}
+                      >
+                        Edit Manually
+                      </Link>
+                    </div>
+                  </div>
+                )}
+
                 <div className="options-list">
                   {generationResult.options?.map(option => (
                     <div
@@ -254,22 +276,33 @@ function Schedules() {
                   <td>{format(new Date(schedule.createdAt), 'MMM d, yyyy HH:mm')}</td>
                   <td>{schedule.publishedAt ? format(new Date(schedule.publishedAt), 'MMM d, yyyy HH:mm') : '-'}</td>
                   <td>
-                    <Link
-                      to={`/schedules/${schedule.id}`}
-                      className="btn btn-outline"
-                      style={{ marginRight: 5, padding: '5px 10px', textDecoration: 'none' }}
-                    >
-                      View
-                    </Link>
-                    {schedule.status === 'draft' && (
-                      <button
-                        className="btn btn-success"
-                        style={{ padding: '5px 10px' }}
-                        onClick={() => handlePublish(schedule.id)}
+                    <div style={{ display: 'flex', gap: 5 }}>
+                      <Link
+                        to={`/schedules/${schedule.id}`}
+                        className="btn btn-outline"
+                        style={{ padding: '5px 10px', textDecoration: 'none' }}
                       >
-                        Publish
-                      </button>
-                    )}
+                        View
+                      </Link>
+                      {schedule.status === 'draft' && (
+                        <>
+                          <Link
+                            to={`/schedules/${schedule.id}/edit`}
+                            className="btn btn-outline"
+                            style={{ padding: '5px 10px', textDecoration: 'none' }}
+                          >
+                            Edit
+                          </Link>
+                          <button
+                            className="btn btn-success"
+                            style={{ padding: '5px 10px' }}
+                            onClick={() => handlePublish(schedule.id)}
+                          >
+                            Publish
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

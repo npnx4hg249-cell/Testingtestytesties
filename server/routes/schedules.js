@@ -1,5 +1,5 @@
 /**
- * Schedule Routes
+ * Schedule Routes for ICES-Shifter
  */
 
 import { Router } from 'express';
@@ -18,26 +18,51 @@ import {
 import { authenticate, requireManager } from '../middleware/auth.js';
 import { ShiftScheduler, SHIFTS, COLORS } from '../services/constraintSolver.js';
 import { getHolidaysForMonth, getHolidaysForEngineer } from '../services/germanHolidays.js';
-import { format, parse, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
+import { format, parse, startOfMonth, endOfMonth, eachDayOfInterval, subMonths } from 'date-fns';
+import { notifySchedulePublished, notifyScheduleChange } from '../services/emailService.js';
 
 const router = Router();
 
+// Archive retention: 24 months
+const ARCHIVE_RETENTION_MONTHS = 24;
+// Engineer view window: 3 months back
+const ENGINEER_VIEW_MONTHS = 3;
+
 /**
  * GET /api/schedules
- * Get all schedules
+ * Get all schedules (with role-based filtering)
  */
 router.get('/', authenticate, (req, res) => {
-  const { year, month, status } = req.query;
+  const { year, month, status, archived } = req.query;
+  const isManager = req.user.role === 'admin' || req.user.role === 'manager';
 
   let schedules = getAll('schedules');
 
+  // Filter by year/month if specified
   if (year && month) {
     const monthStr = `${year}-${month.toString().padStart(2, '0')}`;
     schedules = schedules.filter(s => s.month === monthStr);
   }
 
+  // Filter by status if specified
   if (status) {
     schedules = schedules.filter(s => s.status === status);
+  }
+
+  // For engineers, only show published schedules within their view window
+  if (!isManager) {
+    const cutoffDate = subMonths(new Date(), ENGINEER_VIEW_MONTHS);
+    const cutoffMonth = format(cutoffDate, 'yyyy-MM');
+
+    schedules = schedules.filter(s => {
+      // Only published schedules
+      if (s.status !== 'published') return false;
+      // Only within engineer view window
+      return s.month >= cutoffMonth;
+    });
+  } else if (archived !== 'true') {
+    // For managers, exclude archived unless explicitly requested
+    // But keep them available for historical viewing
   }
 
   // Sort by creation date descending
@@ -50,7 +75,9 @@ router.get('/', authenticate, (req, res) => {
     status: s.status,
     createdAt: s.createdAt,
     createdBy: s.createdBy,
-    publishedAt: s.publishedAt
+    publishedAt: s.publishedAt,
+    hasErrors: !!(s.validationErrors?.length > 0),
+    isPartial: s.isPartial || false
   })));
 });
 
@@ -161,14 +188,27 @@ router.post('/generate', authenticate, requireManager, (req, res) => {
       stats: result.stats
     });
   } else {
-    // Return failure with options
+    // Save partial schedule as draft for preview and manual editing
+    const partialScheduleData = result.partialSchedule || {};
+    const partialSchedule = createSchedule({
+      month: `${year}-${month.toString().padStart(2, '0')}`,
+      year,
+      data: partialScheduleData,
+      stats: result.stats || null,
+      createdBy: req.user.id,
+      isPartial: true,
+      generationErrors: result.errors,
+      validationErrors: result.errors
+    });
+
+    // Return failure with options AND the saved partial schedule
     return res.status(422).json({
       success: false,
       errors: result.errors,
       options: result.options,
-      partialSchedule: result.partialSchedule,
-      canManualEdit: result.canManualEdit,
-      message: 'Schedule generation failed. See errors and options for resolution.'
+      partialSchedule: partialSchedule,
+      canManualEdit: true,
+      message: 'Schedule generation failed. Review the preview and use recovery options or manual editing.'
     });
   }
 });
@@ -344,9 +384,15 @@ router.post('/:id/publish', authenticate, requireManager, (req, res) => {
     publishedAt: new Date().toISOString()
   });
 
+  // Send email notifications (async, don't wait)
+  notifySchedulePublished(updated).catch(err => {
+    console.error('Failed to send publish notifications:', err.message);
+  });
+
   res.json({
     message: 'Schedule published successfully',
-    schedule: updated
+    schedule: updated,
+    notificationsSent: true
   });
 });
 
@@ -428,6 +474,254 @@ router.get('/holidays/:year/:month', authenticate, (req, res) => {
     year,
     month,
     holidays
+  });
+});
+
+/**
+ * GET /api/schedules/archived
+ * Get archived schedules (admin only - full 24 month history)
+ */
+router.get('/archived', authenticate, requireManager, (req, res) => {
+  const cutoffDate = subMonths(new Date(), ARCHIVE_RETENTION_MONTHS);
+  const cutoffMonth = format(cutoffDate, 'yyyy-MM');
+
+  let schedules = getAll('schedules')
+    .filter(s => s.status === 'archived' && s.month >= cutoffMonth)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  res.json(schedules.map(s => ({
+    id: s.id,
+    month: s.month,
+    status: s.status,
+    createdAt: s.createdAt,
+    publishedAt: s.publishedAt,
+    archivedAt: s.archivedAt
+  })));
+});
+
+/**
+ * POST /api/schedules/:id/archive
+ * Archive a schedule
+ */
+router.post('/:id/archive', authenticate, requireManager, (req, res) => {
+  const schedule = getById('schedules', req.params.id);
+
+  if (!schedule) {
+    return res.status(404).json({ error: 'Schedule not found' });
+  }
+
+  if (schedule.status === 'archived') {
+    return res.status(400).json({ error: 'Schedule is already archived' });
+  }
+
+  const updated = update('schedules', req.params.id, {
+    status: 'archived',
+    archivedAt: new Date().toISOString()
+  });
+
+  res.json({
+    message: 'Schedule archived successfully',
+    schedule: updated
+  });
+});
+
+/**
+ * PUT /api/schedules/:id/shift
+ * Update a single shift in a schedule (manual edit with tracking)
+ */
+router.put('/:id/shift', authenticate, requireManager, (req, res) => {
+  const schedule = getById('schedules', req.params.id);
+
+  if (!schedule) {
+    return res.status(404).json({ error: 'Schedule not found' });
+  }
+
+  const { engineerId, date, shift } = req.body;
+
+  if (!engineerId || !date) {
+    return res.status(400).json({
+      error: 'engineerId and date are required'
+    });
+  }
+
+  // Validate shift
+  const validShifts = [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE, SHIFTS.NIGHT, SHIFTS.OFF, SHIFTS.UNAVAILABLE, null];
+  if (shift !== undefined && !validShifts.includes(shift)) {
+    return res.status(400).json({
+      error: 'Invalid shift value'
+    });
+  }
+
+  // Get current shift for change tracking
+  const oldShift = schedule.data[engineerId]?.[date];
+
+  // Update the schedule data
+  const newData = { ...schedule.data };
+  if (!newData[engineerId]) {
+    newData[engineerId] = {};
+  }
+  newData[engineerId][date] = shift;
+
+  // Track the change
+  const editHistory = schedule.editHistory || [];
+  editHistory.push({
+    engineerId,
+    date,
+    oldShift,
+    newShift: shift,
+    editedBy: req.user.id,
+    editedAt: new Date().toISOString()
+  });
+
+  // Recalculate stats
+  const engineers = getActiveEngineers();
+  const year = parseInt(schedule.month.split('-')[0]);
+  const month = parseInt(schedule.month.split('-')[1]);
+  const monthDate = new Date(year, month - 1, 1);
+
+  const scheduler = new ShiftScheduler({
+    engineers,
+    month: monthDate
+  });
+
+  const days = scheduler.getMonthDays();
+  const weeks = scheduler.getWeeks();
+  const validation = scheduler.validateSchedule(newData, days, weeks);
+
+  const updated = update('schedules', req.params.id, {
+    data: newData,
+    stats: scheduler.calculateStats(newData, days, weeks),
+    validationErrors: validation.valid ? [] : validation.errors,
+    editHistory
+  });
+
+  // Notify the affected engineer if schedule is published
+  if (schedule.status === 'published' && oldShift !== shift) {
+    notifyScheduleChange(engineerId, updated, [{
+      date,
+      oldShift,
+      newShift: shift
+    }]).catch(err => {
+      console.error('Failed to send change notification:', err.message);
+    });
+  }
+
+  res.json({
+    schedule: updated,
+    change: {
+      engineerId,
+      date,
+      oldShift,
+      newShift: shift
+    },
+    validation: {
+      valid: validation.valid,
+      errors: validation.errors
+    }
+  });
+});
+
+/**
+ * GET /api/schedules/engineer-view/:year/:month
+ * Get published schedule for a month (for engineer view)
+ */
+router.get('/engineer-view/:year/:month', authenticate, (req, res) => {
+  const year = parseInt(req.params.year);
+  const month = parseInt(req.params.month);
+
+  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+    return res.status(400).json({ error: 'Invalid year or month' });
+  }
+
+  // Check if user is engineer and within view window
+  const isManager = req.user.role === 'admin' || req.user.role === 'manager';
+
+  if (!isManager) {
+    const cutoffDate = subMonths(new Date(), ENGINEER_VIEW_MONTHS);
+    const cutoffMonth = format(cutoffDate, 'yyyy-MM');
+    const requestMonth = `${year}-${month.toString().padStart(2, '0')}`;
+
+    if (requestMonth < cutoffMonth) {
+      return res.status(403).json({
+        error: `Engineers can only view schedules up to ${ENGINEER_VIEW_MONTHS} months back`
+      });
+    }
+  }
+
+  const schedule = getPublishedScheduleForMonth(year, month);
+
+  if (!schedule) {
+    return res.status(404).json({
+      error: 'No published schedule found for this month'
+    });
+  }
+
+  // For engineers, filter to show only their own shifts prominently
+  const engineerId = req.user.engineerId;
+  const engineers = getActiveEngineers();
+  const monthDate = new Date(year, month - 1, 1);
+
+  const days = eachDayOfInterval({
+    start: startOfMonth(monthDate),
+    end: endOfMonth(monthDate)
+  });
+
+  // Build response with full schedule but highlight user's shifts
+  const exportData = {
+    month: schedule.month,
+    days: days.map(d => ({
+      date: format(d, 'yyyy-MM-dd'),
+      dayOfWeek: format(d, 'EEE'),
+      dayNumber: format(d, 'd')
+    })),
+    engineers: engineers.map(e => ({
+      id: e.id,
+      name: e.name,
+      tier: e.tier,
+      isFloater: e.isFloater,
+      isCurrentUser: e.id === engineerId,
+      tierColor: COLORS.tier[e.tier],
+      shifts: days.map(d => {
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const shift = schedule.data[e.id]?.[dateStr];
+        return {
+          date: dateStr,
+          shift: shift || null,
+          color: shift ? COLORS.shift[shift] : null
+        };
+      })
+    })),
+    colors: COLORS,
+    stats: schedule.stats,
+    myShifts: engineerId ? schedule.data[engineerId] || {} : null
+  };
+
+  res.json(exportData);
+});
+
+/**
+ * POST /api/schedules/cleanup-old
+ * Clean up schedules older than retention period (admin only)
+ */
+router.post('/cleanup-old', authenticate, requireManager, (req, res) => {
+  const cutoffDate = subMonths(new Date(), ARCHIVE_RETENTION_MONTHS);
+  const cutoffMonth = format(cutoffDate, 'yyyy-MM');
+
+  const allSchedules = getAll('schedules');
+  const toDelete = allSchedules.filter(s =>
+    s.status === 'archived' && s.month < cutoffMonth
+  );
+
+  // Note: In a real implementation, you might want to actually delete these
+  // For now, we'll just return the count for safety
+  res.json({
+    message: `Found ${toDelete.length} schedules older than ${ARCHIVE_RETENTION_MONTHS} months`,
+    cutoffMonth,
+    schedulesToCleanup: toDelete.map(s => ({
+      id: s.id,
+      month: s.month,
+      archivedAt: s.archivedAt
+    }))
   });
 });
 

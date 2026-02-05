@@ -1,8 +1,9 @@
 /**
- * Engineer Routes
+ * Engineer Routes for ICES-Shifter
  */
 
 import { Router } from 'express';
+import * as XLSX from 'xlsx';
 import {
   getAll,
   getById,
@@ -558,5 +559,412 @@ function getShiftDescription(shift, isWeekend) {
   };
   return times[shift] || '';
 }
+
+/**
+ * POST /api/engineers/bulk-upload-excel
+ * Bulk upload engineers from Excel file (managers/admins only)
+ */
+router.post('/bulk-upload-excel', authenticate, requireManager, (req, res) => {
+  const { excelData } = req.body; // Base64 encoded Excel file
+
+  if (!excelData) {
+    return res.status(400).json({
+      error: 'Excel data is required as base64 string'
+    });
+  }
+
+  try {
+    const buffer = Buffer.from(excelData, 'base64');
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    if (rows.length === 0) {
+      return res.status(400).json({
+        error: 'Excel file must have at least one data row'
+      });
+    }
+
+    const validStates = getAllStates().map(s => s.code);
+    const results = { success: [], errors: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2; // Excel rows start at 1, plus header
+
+      try {
+        // Normalize column names (case-insensitive)
+        const normalizedRow = {};
+        Object.keys(row).forEach(key => {
+          normalizedRow[key.toLowerCase().trim()] = row[key];
+        });
+
+        const name = normalizedRow.name || '';
+        const email = normalizedRow.email || '';
+
+        if (!name || !email) {
+          results.errors.push({
+            row: rowNum,
+            error: 'Name and email are required',
+            data: normalizedRow
+          });
+          continue;
+        }
+
+        const tier = (normalizedRow.tier || 'T2').toString().toUpperCase();
+        if (!['T1', 'T2', 'T3'].includes(tier)) {
+          results.errors.push({
+            row: rowNum,
+            error: `Invalid tier: ${tier}. Must be T1, T2, or T3`,
+            data: normalizedRow
+          });
+          continue;
+        }
+
+        const isFloater = ['true', '1', 'yes'].includes(
+          (normalizedRow.isfloater || '').toString().toLowerCase()
+        );
+
+        const state = (normalizedRow.state || '').toString().toUpperCase() || null;
+        if (state && !validStates.includes(state)) {
+          results.errors.push({
+            row: rowNum,
+            error: `Invalid state: ${state}`,
+            data: normalizedRow
+          });
+          continue;
+        }
+
+        let preferences = [...WEEKDAY_SHIFTS, ...WEEKEND_SHIFTS];
+        if (normalizedRow.preferences) {
+          preferences = normalizedRow.preferences.toString().split(',').map(p => p.trim());
+          const invalidPrefs = preferences.filter(p => !ALL_VALID_SHIFTS.includes(p));
+          if (invalidPrefs.length > 0) {
+            results.errors.push({
+              row: rowNum,
+              error: `Invalid preferences: ${invalidPrefs.join(', ')}`,
+              data: normalizedRow
+            });
+            continue;
+          }
+        }
+
+        const engineer = createEngineer({
+          name,
+          email,
+          tier,
+          isFloater,
+          state,
+          preferences
+        });
+
+        results.success.push({
+          row: rowNum,
+          engineer: { id: engineer.id, name: engineer.name, email: engineer.email }
+        });
+
+      } catch (err) {
+        results.errors.push({
+          row: rowNum,
+          error: `Parse error: ${err.message}`,
+          data: row
+        });
+      }
+    }
+
+    res.status(results.errors.length > 0 ? 207 : 201).json({
+      message: `Created ${results.success.length} engineers, ${results.errors.length} errors`,
+      created: results.success.length,
+      failed: results.errors.length,
+      results
+    });
+
+  } catch (error) {
+    res.status(400).json({
+      error: 'Failed to parse Excel file: ' + error.message
+    });
+  }
+});
+
+/**
+ * GET /api/engineers/export/csv
+ * Export all engineers as CSV
+ */
+router.get('/export/csv', authenticate, requireManager, (req, res) => {
+  const engineers = getAll('engineers');
+
+  const header = 'name,email,tier,isFloater,state,preferences,isActive';
+  const rows = engineers.map(e => {
+    const prefs = (e.preferences || []).join(',');
+    return `"${e.name}","${e.email}","${e.tier}","${e.isFloater}","${e.state || ''}","${prefs}","${e.isActive}"`;
+  });
+
+  const csv = [header, ...rows].join('\n');
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=engineers-export.csv');
+  res.send(csv);
+});
+
+/**
+ * GET /api/engineers/export/excel
+ * Export all engineers as Excel file
+ */
+router.get('/export/excel', authenticate, requireManager, (req, res) => {
+  const engineers = getAll('engineers');
+
+  const data = engineers.map(e => ({
+    Name: e.name,
+    Email: e.email,
+    Tier: e.tier,
+    IsFloater: e.isFloater,
+    State: e.state || '',
+    Preferences: (e.preferences || []).join(', '),
+    IsActive: e.isActive,
+    CreatedAt: e.createdAt
+  }));
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(data);
+  XLSX.utils.book_append_sheet(wb, ws, 'Engineers');
+
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename=engineers-export.xlsx');
+  res.send(buffer);
+});
+
+/**
+ * GET /api/engineers/:id/unavailable-dates
+ * Get detailed unavailable dates for an engineer (with types)
+ * Designed for future SAP WFM integration
+ */
+router.get('/:id/unavailable-dates', authenticate, (req, res) => {
+  // Allow engineers to view their own, or managers to view any
+  if (req.user.role !== 'admin' && req.user.role !== 'manager' && req.user.engineerId !== req.params.id) {
+    return res.status(403).json({
+      error: 'You can only view your own unavailable dates'
+    });
+  }
+
+  const engineer = getById('engineers', req.params.id);
+
+  if (!engineer) {
+    return res.status(404).json({ error: 'Engineer not found' });
+  }
+
+  // Return unavailable dates with metadata
+  // Future: This structure supports SAP WFM sync
+  const unavailableDates = (engineer.unavailableDays || []).map(date => ({
+    date,
+    type: engineer.unavailableTypes?.[date] || 'unavailable', // sick, vacation, other
+    source: engineer.unavailableSources?.[date] || 'manual', // manual, sap_wfm, api
+    notes: engineer.unavailableNotes?.[date] || ''
+  }));
+
+  res.json({
+    engineerId: engineer.id,
+    engineerName: engineer.name,
+    unavailableDates,
+    // Metadata for WFM integration
+    lastSyncedFromWFM: engineer.lastWFMSync || null,
+    wfmEnabled: engineer.wfmEnabled || false
+  });
+});
+
+/**
+ * POST /api/engineers/:id/unavailable-dates
+ * Add unavailable dates with types (vacation, sick, etc.)
+ */
+router.post('/:id/unavailable-dates', authenticate, (req, res) => {
+  // Allow engineers to update their own, or managers to update any
+  if (req.user.role !== 'admin' && req.user.role !== 'manager' && req.user.engineerId !== req.params.id) {
+    return res.status(403).json({
+      error: 'You can only update your own unavailable dates'
+    });
+  }
+
+  const engineer = getById('engineers', req.params.id);
+
+  if (!engineer) {
+    return res.status(404).json({ error: 'Engineer not found' });
+  }
+
+  const { dates } = req.body;
+
+  if (!dates || !Array.isArray(dates)) {
+    return res.status(400).json({
+      error: 'dates must be an array of {date, type, notes} objects'
+    });
+  }
+
+  // Validate and process dates
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  const validTypes = ['sick', 'vacation', 'unavailable', 'personal', 'other'];
+
+  const currentDays = new Set(engineer.unavailableDays || []);
+  const currentTypes = { ...(engineer.unavailableTypes || {}) };
+  const currentNotes = { ...(engineer.unavailableNotes || {}) };
+  const currentSources = { ...(engineer.unavailableSources || {}) };
+
+  for (const item of dates) {
+    if (!item.date || !dateRegex.test(item.date)) {
+      return res.status(400).json({
+        error: `Invalid date format: ${item.date}. Must be YYYY-MM-DD`
+      });
+    }
+
+    const type = item.type || 'unavailable';
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({
+        error: `Invalid type: ${type}. Must be: ${validTypes.join(', ')}`
+      });
+    }
+
+    currentDays.add(item.date);
+    currentTypes[item.date] = type;
+    currentNotes[item.date] = item.notes || '';
+    currentSources[item.date] = 'manual';
+  }
+
+  const updated = update('engineers', req.params.id, {
+    unavailableDays: [...currentDays].sort(),
+    unavailableTypes: currentTypes,
+    unavailableNotes: currentNotes,
+    unavailableSources: currentSources
+  });
+
+  res.json({
+    id: updated.id,
+    name: updated.name,
+    unavailableDays: updated.unavailableDays,
+    addedCount: dates.length
+  });
+});
+
+/**
+ * DELETE /api/engineers/:id/unavailable-dates
+ * Remove specific unavailable dates
+ */
+router.delete('/:id/unavailable-dates', authenticate, (req, res) => {
+  // Allow engineers to update their own, or managers to update any
+  if (req.user.role !== 'admin' && req.user.role !== 'manager' && req.user.engineerId !== req.params.id) {
+    return res.status(403).json({
+      error: 'You can only update your own unavailable dates'
+    });
+  }
+
+  const engineer = getById('engineers', req.params.id);
+
+  if (!engineer) {
+    return res.status(404).json({ error: 'Engineer not found' });
+  }
+
+  const { dates } = req.body;
+
+  if (!dates || !Array.isArray(dates)) {
+    return res.status(400).json({
+      error: 'dates must be an array of date strings (YYYY-MM-DD)'
+    });
+  }
+
+  const currentDays = new Set(engineer.unavailableDays || []);
+  const currentTypes = { ...(engineer.unavailableTypes || {}) };
+  const currentNotes = { ...(engineer.unavailableNotes || {}) };
+  const currentSources = { ...(engineer.unavailableSources || {}) };
+
+  let removedCount = 0;
+  for (const date of dates) {
+    if (currentDays.has(date)) {
+      currentDays.delete(date);
+      delete currentTypes[date];
+      delete currentNotes[date];
+      delete currentSources[date];
+      removedCount++;
+    }
+  }
+
+  const updated = update('engineers', req.params.id, {
+    unavailableDays: [...currentDays].sort(),
+    unavailableTypes: currentTypes,
+    unavailableNotes: currentNotes,
+    unavailableSources: currentSources
+  });
+
+  res.json({
+    id: updated.id,
+    name: updated.name,
+    unavailableDays: updated.unavailableDays,
+    removedCount
+  });
+});
+
+/**
+ * GET /api/engineers/excel-template
+ * Download Excel template for bulk upload
+ */
+router.get('/excel-template', (req, res) => {
+  const templateData = [
+    {
+      Name: 'John Doe',
+      Email: 'john.doe@example.com',
+      Tier: 'T2',
+      IsFloater: 'false',
+      State: 'BY',
+      Preferences: 'Early,Morning,Late,Night,WeekendEarly,WeekendMorning,WeekendLate,WeekendNight'
+    },
+    {
+      Name: 'Jane Smith',
+      Email: 'jane.smith@example.com',
+      Tier: 'T1',
+      IsFloater: 'false',
+      State: 'NW',
+      Preferences: 'Early,Morning,WeekendMorning'
+    },
+    {
+      Name: 'Bob Wilson',
+      Email: 'bob.wilson@example.com',
+      Tier: 'T3',
+      IsFloater: 'true',
+      State: 'BE',
+      Preferences: 'Late,Night,WeekendLate,WeekendNight'
+    }
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(templateData);
+  XLSX.utils.book_append_sheet(wb, ws, 'Engineers');
+
+  // Add instructions sheet
+  const instructions = [
+    ['ICES-Shifter Engineer Import Template'],
+    [''],
+    ['Instructions:'],
+    ['1. Fill in engineer data in the Engineers sheet'],
+    ['2. Required fields: Name, Email'],
+    ['3. Tier: T1, T2, or T3 (default: T2)'],
+    ['4. IsFloater: true or false (default: false)'],
+    ['5. State: German state code (BY, NW, BE, etc.)'],
+    ['6. Preferences: Comma-separated shift preferences'],
+    [''],
+    ['Valid Shift Preferences:'],
+    ['Weekday: Early, Morning, Late, Night'],
+    ['Weekend: WeekendEarly, WeekendMorning, WeekendLate, WeekendNight'],
+    [''],
+    ['Valid German States:'],
+    ...getAllStates().map(s => [`${s.code}: ${s.name}`])
+  ];
+
+  const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
+  XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instructions');
+
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename=engineers-template.xlsx');
+  res.send(buffer);
+});
 
 export default router;

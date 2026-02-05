@@ -1,7 +1,7 @@
 {
-  "name": "cc-shifter",
-  "version": "1.0.0",
-  "description": "Shift planning application for engineering teams",
+  "name": "ices-shifter",
+  "version": "2.0.0",
+  "description": "ICES-Shifter - Intelligent Constraint-based Engineering Scheduler",
   "main": "server/index.js",
   "type": "module",
   "scripts": {
@@ -20,7 +20,9 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "uuid": "^9.0.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "nodemailer": "^6.9.8",
+    "simple-git": "^3.22.0"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

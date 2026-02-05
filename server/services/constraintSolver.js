@@ -182,10 +182,31 @@ export class ShiftScheduler {
 
   /**
    * Check if an engineer can work a specific shift
+   * @param {Object} engineer - The engineer object
+   * @param {string} shift - The shift type (Early, Morning, Late, Night)
+   * @param {Date} date - Optional date to check weekend preferences
    */
-  canWorkShift(engineer, shift) {
+  canWorkShift(engineer, shift, date = null) {
     // Check preferences
     if (engineer.preferences && engineer.preferences.length > 0) {
+      // If date is provided, check for weekend-specific preferences
+      if (date && this.isWeekend(date)) {
+        // Check for weekend-specific preference first
+        const weekendPref = `Weekend${shift}`;
+        if (engineer.preferences.includes(weekendPref)) {
+          return true;
+        }
+        // If no weekend-specific preference, check if they have regular shift preference
+        // but NOT if they have weekend preferences defined (meaning they explicitly chose weekend shifts)
+        const hasAnyWeekendPref = engineer.preferences.some(p => p.startsWith('Weekend'));
+        if (hasAnyWeekendPref) {
+          // They have weekend preferences defined, so only allow if weekend shift is in preferences
+          return false;
+        }
+        // No weekend preferences defined, fall back to regular preferences
+        return engineer.preferences.includes(shift);
+      }
+      // Weekday - check regular preferences
       return engineer.preferences.includes(shift);
     }
     // If no preferences specified, can work any shift
@@ -322,8 +343,11 @@ export class ShiftScheduler {
   assignNightShifts(schedule, engineers, days, weeks) {
     const errors = [];
 
-    // Find engineers who can work nights
-    const nightEligible = engineers.filter(e => this.canWorkShift(e, SHIFTS.NIGHT));
+    // Find engineers who can work nights (check both weekday and weekend nights)
+    const nightEligible = engineers.filter(e =>
+      this.canWorkShift(e, SHIFTS.NIGHT) ||
+      (e.preferences && e.preferences.includes('WeekendNight'))
+    );
 
     if (nightEligible.length < 2) {
       errors.push({
@@ -391,7 +415,8 @@ export class ShiftScheduler {
           if (assigned >= coverage[SHIFTS.NIGHT].preferred) break;
 
           if (schedule[engineer.id][dateStr] === null &&
-              this.isEngineerAvailable(engineer, day)) {
+              this.isEngineerAvailable(engineer, day) &&
+              this.canWorkShift(engineer, SHIFTS.NIGHT, day)) {
             // Check transition validity
             const prevDay = addDays(day, -1);
             const prevDateStr = format(prevDay, 'yyyy-MM-dd');
@@ -437,7 +462,7 @@ export class ShiftScheduler {
         const eligible = engineers.filter(e => {
           if (schedule[e.id][dateStr] !== null) return false; // Already assigned
           if (!this.isEngineerAvailable(e, day)) return false;
-          if (!this.canWorkShift(e, shift)) return false;
+          if (!this.canWorkShift(e, shift, day)) return false;
 
           // Check transition validity
           const prevDay = addDays(day, -1);
@@ -622,7 +647,7 @@ export class ShiftScheduler {
 
               // Check availability
               if (!this.isEngineerAvailable(floater, day)) continue;
-              if (!this.canWorkShift(floater, shift)) continue;
+              if (!this.canWorkShift(floater, shift, day)) continue;
               if (schedule[floater.id][dateStr] !== null) continue;
 
               // Check no other floater on same shift

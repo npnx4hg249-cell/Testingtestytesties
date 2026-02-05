@@ -17,6 +17,11 @@ import { getAllStates, getHolidaysForEngineer } from '../services/germanHolidays
 
 const router = Router();
 
+// Valid shift preferences (weekday and weekend)
+const WEEKDAY_SHIFTS = ['Early', 'Morning', 'Late', 'Night'];
+const WEEKEND_SHIFTS = ['WeekendEarly', 'WeekendMorning', 'WeekendLate', 'WeekendNight'];
+const ALL_VALID_SHIFTS = [...WEEKDAY_SHIFTS, ...WEEKEND_SHIFTS];
+
 /**
  * GET /api/engineers
  * Get all engineers
@@ -109,10 +114,9 @@ router.post('/', authenticate, requireManager, (req, res) => {
   }
 
   // Validate preferences if provided
-  const validShifts = ['Early', 'Morning', 'Late', 'Night'];
-  if (preferences && preferences.some(p => !validShifts.includes(p))) {
+  if (preferences && preferences.some(p => !ALL_VALID_SHIFTS.includes(p))) {
     return res.status(400).json({
-      error: 'Invalid shift preference. Must be Early, Morning, Late, or Night'
+      error: 'Invalid shift preference. Must be one of: ' + ALL_VALID_SHIFTS.join(', ')
     });
   }
 
@@ -122,7 +126,7 @@ router.post('/', authenticate, requireManager, (req, res) => {
     tier: tier || 'T2',
     isFloater: isFloater || false,
     state,
-    preferences: preferences || validShifts // Default to all shifts
+    preferences: preferences || [...WEEKDAY_SHIFTS, ...WEEKEND_SHIFTS] // Default to all shifts
   });
 
   res.status(201).json(engineer);
@@ -219,10 +223,9 @@ router.put('/:id/preferences', authenticate, (req, res) => {
     });
   }
 
-  const validShifts = ['Early', 'Morning', 'Late', 'Night'];
-  if (preferences.some(p => !validShifts.includes(p))) {
+  if (preferences.some(p => !ALL_VALID_SHIFTS.includes(p))) {
     return res.status(400).json({
-      error: 'Invalid shift preference. Must be Early, Morning, Late, or Night'
+      error: 'Invalid shift preference. Must be one of: ' + ALL_VALID_SHIFTS.join(', ')
     });
   }
 
@@ -311,5 +314,249 @@ router.get('/:id/holidays', authenticate, (req, res) => {
     holidays
   });
 });
+
+/**
+ * POST /api/engineers/:id/duplicate
+ * Duplicate an existing engineer (managers/admins only)
+ */
+router.post('/:id/duplicate', authenticate, requireManager, (req, res) => {
+  const sourceEngineer = getById('engineers', req.params.id);
+
+  if (!sourceEngineer) {
+    return res.status(404).json({
+      error: 'Engineer not found'
+    });
+  }
+
+  // Create a copy with modified name and email
+  const newEngineer = createEngineer({
+    name: `${sourceEngineer.name} (Copy)`,
+    email: `copy.${sourceEngineer.email}`,
+    tier: sourceEngineer.tier,
+    isFloater: sourceEngineer.isFloater,
+    state: sourceEngineer.state,
+    preferences: [...(sourceEngineer.preferences || [])]
+  });
+
+  res.status(201).json(newEngineer);
+});
+
+/**
+ * POST /api/engineers/bulk-upload
+ * Bulk upload engineers from CSV (managers/admins only)
+ *
+ * CSV Format:
+ * name,email,tier,isFloater,state,preferences
+ * "John Doe",john@example.com,T2,false,BY,"Early,Morning,Late"
+ */
+router.post('/bulk-upload', authenticate, requireManager, (req, res) => {
+  const { csvData } = req.body;
+
+  if (!csvData || typeof csvData !== 'string') {
+    return res.status(400).json({
+      error: 'CSV data is required as a string'
+    });
+  }
+
+  const lines = csvData.trim().split('\n');
+
+  if (lines.length < 2) {
+    return res.status(400).json({
+      error: 'CSV must have a header row and at least one data row'
+    });
+  }
+
+  // Parse header
+  const header = parseCSVLine(lines[0].toLowerCase());
+  const requiredColumns = ['name', 'email'];
+  const missingColumns = requiredColumns.filter(col => !header.includes(col));
+
+  if (missingColumns.length > 0) {
+    return res.status(400).json({
+      error: `Missing required columns: ${missingColumns.join(', ')}`
+    });
+  }
+
+  const validStates = getAllStates().map(s => s.code);
+  const results = {
+    success: [],
+    errors: []
+  };
+
+  // Process each row
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    try {
+      const values = parseCSVLine(line);
+      const row = {};
+
+      header.forEach((col, idx) => {
+        row[col] = values[idx] || '';
+      });
+
+      // Validate required fields
+      if (!row.name || !row.email) {
+        results.errors.push({
+          row: i + 1,
+          error: 'Name and email are required',
+          data: row
+        });
+        continue;
+      }
+
+      // Parse and validate tier
+      const tier = row.tier?.toUpperCase() || 'T2';
+      if (!['T1', 'T2', 'T3'].includes(tier)) {
+        results.errors.push({
+          row: i + 1,
+          error: `Invalid tier: ${row.tier}. Must be T1, T2, or T3`,
+          data: row
+        });
+        continue;
+      }
+
+      // Parse isFloater
+      const isFloater = row.isfloater?.toLowerCase() === 'true' || row.isfloater === '1';
+
+      // Validate state
+      const state = row.state?.toUpperCase() || null;
+      if (state && !validStates.includes(state)) {
+        results.errors.push({
+          row: i + 1,
+          error: `Invalid state: ${row.state}`,
+          data: row
+        });
+        continue;
+      }
+
+      // Parse preferences
+      let preferences = [...WEEKDAY_SHIFTS, ...WEEKEND_SHIFTS]; // Default to all
+      if (row.preferences) {
+        preferences = row.preferences.split(',').map(p => p.trim());
+        const invalidPrefs = preferences.filter(p => !ALL_VALID_SHIFTS.includes(p));
+        if (invalidPrefs.length > 0) {
+          results.errors.push({
+            row: i + 1,
+            error: `Invalid preferences: ${invalidPrefs.join(', ')}`,
+            data: row
+          });
+          continue;
+        }
+      }
+
+      // Create engineer
+      const engineer = createEngineer({
+        name: row.name,
+        email: row.email,
+        tier,
+        isFloater,
+        state,
+        preferences
+      });
+
+      results.success.push({
+        row: i + 1,
+        engineer: {
+          id: engineer.id,
+          name: engineer.name,
+          email: engineer.email
+        }
+      });
+
+    } catch (err) {
+      results.errors.push({
+        row: i + 1,
+        error: `Parse error: ${err.message}`,
+        data: line
+      });
+    }
+  }
+
+  res.status(results.errors.length > 0 ? 207 : 201).json({
+    message: `Created ${results.success.length} engineers, ${results.errors.length} errors`,
+    created: results.success.length,
+    failed: results.errors.length,
+    results
+  });
+});
+
+/**
+ * GET /api/engineers/csv-template
+ * Get CSV template for bulk upload
+ */
+router.get('/csv-template', (req, res) => {
+  const template = `name,email,tier,isFloater,state,preferences
+"John Doe",john.doe@example.com,T2,false,BY,"Early,Morning,Late,Night,WeekendEarly,WeekendMorning,WeekendLate,WeekendNight"
+"Jane Smith",jane.smith@example.com,T1,false,NW,"Early,Morning,WeekendMorning"
+"Bob Wilson",bob.wilson@example.com,T3,true,BE,"Late,Night,WeekendLate,WeekendNight"`;
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=engineers-template.csv');
+  res.send(template);
+});
+
+/**
+ * GET /api/engineers/shift-options
+ * Get available shift preference options
+ */
+router.get('/shift-options', (req, res) => {
+  res.json({
+    weekday: WEEKDAY_SHIFTS.map(s => ({
+      id: s,
+      name: s,
+      description: getShiftDescription(s, false)
+    })),
+    weekend: WEEKEND_SHIFTS.map(s => ({
+      id: s,
+      name: s.replace('Weekend', ''),
+      description: getShiftDescription(s, true)
+    })),
+    all: ALL_VALID_SHIFTS
+  });
+});
+
+/**
+ * Helper: Parse CSV line handling quoted values
+ */
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current.trim());
+  return result;
+}
+
+/**
+ * Helper: Get shift description
+ */
+function getShiftDescription(shift, isWeekend) {
+  const times = {
+    'Early': '07:00 - 15:30',
+    'Morning': '10:00 - 18:30',
+    'Late': isWeekend ? '15:00 - 22:30' : '15:00 - 23:30',
+    'Night': '23:00 - 07:30',
+    'WeekendEarly': '07:00 - 15:30',
+    'WeekendMorning': '10:00 - 18:30',
+    'WeekendLate': '15:00 - 22:30',
+    'WeekendNight': '23:00 - 07:30'
+  };
+  return times[shift] || '';
+}
 
 export default router;

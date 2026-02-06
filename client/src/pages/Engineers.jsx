@@ -26,9 +26,13 @@ function Engineers() {
     email: '',
     tier: 'T2',
     isFloater: false,
+    inTraining: false,
     state: '',
     preferences: DEFAULT_PREFERENCES
   });
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [selectedEngineer, setSelectedEngineer] = useState(null);
+  const [generatedPassword, setGeneratedPassword] = useState('');
 
   useEffect(() => {
     loadData();
@@ -184,6 +188,7 @@ function Engineers() {
         email: engineer.email,
         tier: engineer.tier,
         isFloater: engineer.isFloater,
+        inTraining: engineer.inTraining || false,
         state: engineer.state || '',
         preferences: engineer.preferences || DEFAULT_PREFERENCES
       });
@@ -194,6 +199,7 @@ function Engineers() {
         email: '',
         tier: 'T2',
         isFloater: false,
+        inTraining: false,
         state: '',
         preferences: DEFAULT_PREFERENCES
       });
@@ -209,9 +215,58 @@ function Engineers() {
       email: '',
       tier: 'T2',
       isFloater: false,
+      inTraining: false,
       state: '',
       preferences: DEFAULT_PREFERENCES
     });
+  };
+
+  const openPasswordModal = (engineer) => {
+    setSelectedEngineer(engineer);
+    setGeneratedPassword('');
+    setShowPasswordModal(true);
+  };
+
+  const handleGeneratePassword = async () => {
+    try {
+      const response = await api.generatePassword();
+      setGeneratedPassword(response.password);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleResetPassword = async (sendEmail = false) => {
+    if (!generatedPassword) {
+      setError('Please generate a password first');
+      return;
+    }
+
+    try {
+      await api.resetEngineerPassword(selectedEngineer.id, generatedPassword, false, sendEmail);
+      setSuccess(`Password reset for ${selectedEngineer.name}${sendEmail ? ' (email sent)' : ''}`);
+      setShowPasswordModal(false);
+      setTimeout(() => setSuccess(''), 5000);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleCreateUserAccount = async (sendEmail = false) => {
+    try {
+      const response = await api.createEngineerUser(
+        selectedEngineer.id,
+        null,
+        true,
+        sendEmail,
+        false
+      );
+      setGeneratedPassword(response.generatedPassword);
+      setSuccess(`User account created for ${selectedEngineer.name}`);
+      setTimeout(() => setSuccess(''), 5000);
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const togglePreference = (shift) => {
@@ -344,9 +399,12 @@ function Engineers() {
                     <button className="btn btn-outline" style={{ padding: '5px 10px' }} onClick={() => openModal(eng)} title="Edit">
                       Edit
                     </button>
-                    <Link to={`/engineers/${eng.id}/unavailability`} className="btn btn-outline" style={{ padding: '5px 10px', textDecoration: 'none' }} title="Calendar">
-                      Calendar
+                    <Link to={`/engineers/${eng.id}/availability`} className="btn btn-outline" style={{ padding: '5px 10px', textDecoration: 'none' }} title="Availability">
+                      Availability
                     </Link>
+                    <button className="btn btn-outline" style={{ padding: '5px 10px' }} onClick={() => openPasswordModal(eng)} title="Password">
+                      Password
+                    </button>
                     <button className="btn btn-outline" style={{ padding: '5px 10px' }} onClick={() => handleDuplicate(eng)} title="Duplicate">
                       Copy
                     </button>
@@ -456,11 +514,28 @@ function Engineers() {
                     <input
                       type="checkbox"
                       checked={formData.isFloater}
-                      onChange={e => setFormData(prev => ({ ...prev, isFloater: e.target.checked }))}
+                      onChange={e => setFormData(prev => ({ ...prev, isFloater: e.target.checked, inTraining: false }))}
                       style={{ width: 'auto' }}
                     />
                     Floater (max 2.5 shifts/week, flexible scheduling)
                   </label>
+                </div>
+
+                <div className="form-group">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.inTraining}
+                      onChange={e => setFormData(prev => ({ ...prev, inTraining: e.target.checked, isFloater: false }))}
+                      style={{ width: 'auto' }}
+                    />
+                    In Training (Mon-Fri Training shift, Sat-Sun Off)
+                  </label>
+                  {formData.inTraining && (
+                    <span style={{ fontSize: 12, color: '#9c27b0', marginLeft: 10 }}>
+                      Training engineers are excluded from regular shift rotation
+                    </span>
+                  )}
                 </div>
 
                 {/* Weekday Preferences */}
@@ -691,6 +766,104 @@ function Engineers() {
                   Close
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Management Modal */}
+      {showPasswordModal && selectedEngineer && (
+        <div className="modal-overlay" onClick={() => setShowPasswordModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
+            <div className="modal-header">
+              <h2>Password Management</h2>
+              <button className="btn btn-outline" onClick={() => setShowPasswordModal(false)} style={{ padding: '5px 10px' }}>×</button>
+            </div>
+            <div className="modal-body">
+              <p><strong>Engineer:</strong> {selectedEngineer.name}</p>
+              <p><strong>Email:</strong> {selectedEngineer.email}</p>
+
+              <div style={{ background: '#f5f5f5', padding: 15, borderRadius: 8, marginTop: 15 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <button className="btn btn-outline" onClick={handleGeneratePassword}>
+                    Generate Strong Password
+                  </button>
+                </div>
+
+                {generatedPassword && (
+                  <div style={{ marginTop: 10 }}>
+                    <label style={{ display: 'block', marginBottom: 5 }}>Generated Password:</label>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      background: '#fff',
+                      padding: '10px 15px',
+                      borderRadius: 4,
+                      fontFamily: 'monospace',
+                      fontSize: 14,
+                      border: '1px solid #ddd'
+                    }}>
+                      <span style={{ flex: 1 }}>{generatedPassword}</span>
+                      <button
+                        className="btn btn-outline"
+                        style={{ padding: '5px 10px' }}
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedPassword);
+                          setSuccess('Password copied to clipboard');
+                          setTimeout(() => setSuccess(''), 2000);
+                        }}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginTop: 20 }}>
+                <p style={{ color: '#666', fontSize: 13, marginBottom: 10 }}>
+                  Choose an action for this engineer:
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleResetPassword(false)}
+                    disabled={!generatedPassword}
+                  >
+                    Reset Password (Manual Share)
+                  </button>
+                  {selectedEngineer.email && (
+                    <button
+                      className="btn btn-outline"
+                      onClick={() => handleResetPassword(true)}
+                      disabled={!generatedPassword}
+                    >
+                      Reset Password and Email to User
+                    </button>
+                  )}
+                  <hr style={{ margin: '10px 0', border: 'none', borderTop: '1px solid #eee' }} />
+                  <button
+                    className="btn btn-outline"
+                    onClick={() => handleCreateUserAccount(false)}
+                  >
+                    Create User Account (if not exists)
+                  </button>
+                  {selectedEngineer.email && (
+                    <button
+                      className="btn btn-outline"
+                      onClick={() => handleCreateUserAccount(true)}
+                    >
+                      Create Account and Email Credentials
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-outline" onClick={() => setShowPasswordModal(false)}>
+                Close
+              </button>
             </div>
           </div>
         </div>

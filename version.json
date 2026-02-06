@@ -1,14 +1,31 @@
 {
-  "version": "2.0.0",
-  "name": "ICES-Shifter",
+  "version": "26.6.5.18.30.1",
+  "name": "Shifter",
+  "subtitle": "for ICES",
   "description": "Intelligent Constraint-based Engineering Scheduler",
   "releaseDate": "2026-02-05",
   "changelog": [
     {
+      "version": "26.6.5.18.30.1",
+      "date": "2026-02-05",
+      "changes": [
+        "Renamed application to Shifter for ICES",
+        "New versioning schema: YY.WW.D.HH.MM.X",
+        "Added password management with strong password requirements",
+        "Added 2FA support with OTP",
+        "Added account lockout after 4 failed attempts",
+        "Added auto sign-out after 1 hour of inactivity",
+        "Added dark mode support",
+        "Added In Training flag for engineers",
+        "Added admin dashboard notifications for failed logins",
+        "Improved shift plan generation rules",
+        "Added SMTP configuration in admin panel"
+      ]
+    },
+    {
       "version": "2.0.0",
       "date": "2026-02-05",
       "changes": [
-        "Renamed application to ICES-Shifter",
         "Added version management system",
         "Added auto-update feature from GitHub",
         "Added Excel import/export for engineers",
@@ -19,17 +36,7 @@
         "Added admin-as-engineer functionality",
         "Added email notification system",
         "Added engineer view for shift plans",
-        "Added shift consistency rule in generation engine",
-        "Added CSV bulk upload and weekend preferences (from v1.1.0)"
-      ]
-    },
-    {
-      "version": "1.1.0",
-      "date": "2026-02-05",
-      "changes": [
-        "Added CSV bulk upload for engineers",
-        "Added weekend-specific shift preferences",
-        "Added duplicate engineer functionality"
+        "Added shift consistency rule in generation engine"
       ]
     },
     {

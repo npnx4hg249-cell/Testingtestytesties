@@ -1,5 +1,5 @@
 /**
- * Schedule Routes for ICES-Shifter
+ * Schedule Routes for Shifter for ICES
  */
 
 import { Router } from 'express';
@@ -292,7 +292,7 @@ router.post('/generate-with-option', authenticate, requireManager, (req, res) =>
 
 /**
  * PUT /api/schedules/:id
- * Update a schedule (manual edit)
+ * Update a schedule (manual edit) - works for both draft and published schedules
  */
 router.put('/:id', authenticate, requireManager, (req, res) => {
   const schedule = getById('schedules', req.params.id);
@@ -300,12 +300,6 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
   if (!schedule) {
     return res.status(404).json({
       error: 'Schedule not found'
-    });
-  }
-
-  if (schedule.status === 'published') {
-    return res.status(400).json({
-      error: 'Cannot edit a published schedule. Create a new version instead.'
     });
   }
 
@@ -335,10 +329,24 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
   const weeks = scheduler.getWeeks();
   const validation = scheduler.validateSchedule(data, days, weeks);
 
+  // Track edit history if schedule is published
+  const editHistory = schedule.editHistory || [];
+  if (schedule.status === 'published') {
+    editHistory.push({
+      editedBy: req.user.id,
+      editedAt: new Date().toISOString(),
+      type: 'bulk_update',
+      reason: req.body.reason || 'Manual edit'
+    });
+  }
+
   const updated = update('schedules', req.params.id, {
     data,
     stats: scheduler.calculateStats(data, days, weeks),
-    validationErrors: validation.valid ? [] : validation.errors
+    validationErrors: validation.valid ? [] : validation.errors,
+    editHistory,
+    lastEditedAt: new Date().toISOString(),
+    lastEditedBy: req.user.id
   });
 
   res.json({
@@ -348,6 +356,93 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
       errors: validation.errors
     }
   });
+});
+
+/**
+ * DELETE /api/schedules/:id
+ * Delete an unpublished schedule
+ */
+router.delete('/:id', authenticate, requireManager, (req, res) => {
+  const schedule = getById('schedules', req.params.id);
+
+  if (!schedule) {
+    return res.status(404).json({
+      error: 'Schedule not found'
+    });
+  }
+
+  if (schedule.status === 'published') {
+    return res.status(400).json({
+      error: 'Cannot delete a published schedule. Archive it instead.'
+    });
+  }
+
+  const { remove } = require('../data/store.js');
+  remove('schedules', req.params.id);
+
+  res.json({
+    message: 'Schedule deleted successfully'
+  });
+});
+
+/**
+ * GET /api/schedules/latest-published
+ * Get the most recent published schedule (for dashboard)
+ */
+router.get('/latest-published', authenticate, (req, res) => {
+  const schedules = getAll('schedules')
+    .filter(s => s.status === 'published')
+    .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+
+  if (schedules.length === 0) {
+    return res.status(404).json({
+      error: 'No published schedules found'
+    });
+  }
+
+  const schedule = schedules[0];
+  const engineers = getActiveEngineers();
+  const year = parseInt(schedule.month.split('-')[0]);
+  const month = parseInt(schedule.month.split('-')[1]);
+  const monthDate = new Date(year, month - 1, 1);
+
+  const days = eachDayOfInterval({
+    start: startOfMonth(monthDate),
+    end: endOfMonth(monthDate)
+  });
+
+  // Build summary for dashboard
+  const exportData = {
+    id: schedule.id,
+    month: schedule.month,
+    publishedAt: schedule.publishedAt,
+    days: days.map(d => ({
+      date: format(d, 'yyyy-MM-dd'),
+      dayOfWeek: format(d, 'EEE'),
+      dayNumber: format(d, 'd')
+    })),
+    engineers: engineers.map(e => ({
+      id: e.id,
+      name: e.name,
+      tier: e.tier,
+      isFloater: e.isFloater,
+      inTraining: e.inTraining || false,
+      tierColor: COLORS.tier[e.tier],
+      shifts: days.map(d => {
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const shift = schedule.data[e.id]?.[dateStr];
+        return {
+          date: dateStr,
+          shift: shift || null,
+          color: shift ? COLORS.shift[shift] : null
+        };
+      })
+    })),
+    colors: COLORS,
+    stats: schedule.stats
+  };
+
+  res.json(exportData);
 });
 
 /**

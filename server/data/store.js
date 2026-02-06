@@ -1,5 +1,5 @@
 /**
- * Simple JSON-based data store for ICES-Shifter
+ * Simple JSON-based data store for Shifter for ICES
  *
  * In production, this would be replaced with a proper database.
  * This file provides in-memory storage with file persistence.
@@ -240,6 +240,7 @@ export function createEngineer(engineerData) {
     email: engineerData.email,
     tier: engineerData.tier || 'T2',
     isFloater: engineerData.isFloater || false,
+    inTraining: engineerData.inTraining || false,
     state: engineerData.state || null, // German state code
     preferences: engineerData.preferences || [], // Shift preferences
     unavailableDays: engineerData.unavailableDays || [],

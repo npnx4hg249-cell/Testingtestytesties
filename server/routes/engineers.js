@@ -1,9 +1,10 @@
 /**
- * Engineer Routes for ICES-Shifter
+ * Engineer Routes for Shifter for ICES
  */
 
 import { Router } from 'express';
 import * as XLSX from 'xlsx';
+import bcrypt from 'bcryptjs';
 import {
   getAll,
   getById,
@@ -11,10 +12,20 @@ import {
   update,
   remove,
   createEngineer,
-  getActiveEngineers
+  getActiveEngineers,
+  findUserByEmail,
+  findOne
 } from '../data/store.js';
-import { authenticate, requireManager, requireEngineerOrManager } from '../middleware/auth.js';
+import {
+  authenticate,
+  requireManager,
+  requireEngineerOrManager,
+  requireAdmin,
+  generateStrongPassword,
+  validatePasswordStrength
+} from '../middleware/auth.js';
 import { getAllStates, getHolidaysForEngineer } from '../services/germanHolidays.js';
+import { sendPasswordEmail } from '../services/emailService.js';
 
 const router = Router();
 
@@ -41,6 +52,7 @@ router.get('/', authenticate, (req, res) => {
     email: e.email,
     tier: e.tier,
     isFloater: e.isFloater,
+    inTraining: e.inTraining || false,
     state: e.state,
     preferences: e.preferences,
     isActive: e.isActive,
@@ -77,6 +89,7 @@ router.get('/:id', authenticate, (req, res) => {
     email: engineer.email,
     tier: engineer.tier,
     isFloater: engineer.isFloater,
+    inTraining: engineer.inTraining || false,
     state: engineer.state,
     preferences: engineer.preferences,
     unavailableDays: engineer.unavailableDays,
@@ -90,11 +103,28 @@ router.get('/:id', authenticate, (req, res) => {
  * Create a new engineer (managers/admins only)
  */
 router.post('/', authenticate, requireManager, (req, res) => {
-  const { name, email, tier, isFloater, state, preferences } = req.body;
+  const { name, email, tier, isFloater, inTraining, state, preferences } = req.body;
 
   if (!name || !email) {
     return res.status(400).json({
       error: 'Name and email are required'
+    });
+  }
+
+  // Check email uniqueness across engineers and users
+  const existingEngineer = getAll('engineers').find(e =>
+    e.email && e.email.toLowerCase() === email.toLowerCase()
+  );
+  if (existingEngineer) {
+    return res.status(400).json({
+      error: 'An engineer with this email already exists'
+    });
+  }
+
+  const existingUser = findUserByEmail(email);
+  if (existingUser) {
+    return res.status(400).json({
+      error: 'A user account with this email already exists'
     });
   }
 
@@ -126,6 +156,7 @@ router.post('/', authenticate, requireManager, (req, res) => {
     email,
     tier: tier || 'T2',
     isFloater: isFloater || false,
+    inTraining: inTraining || false,
     state,
     preferences: preferences || [...WEEKDAY_SHIFTS, ...WEEKEND_SHIFTS] // Default to all shifts
   });
@@ -146,7 +177,27 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
     });
   }
 
-  const { name, email, tier, isFloater, state, preferences, isActive } = req.body;
+  const { name, email, tier, isFloater, inTraining, state, preferences, isActive } = req.body;
+
+  // Check email uniqueness if email is being changed
+  if (email && email.toLowerCase() !== (engineer.email || '').toLowerCase()) {
+    const existingEngineer = getAll('engineers').find(e =>
+      e.id !== req.params.id &&
+      e.email && e.email.toLowerCase() === email.toLowerCase()
+    );
+    if (existingEngineer) {
+      return res.status(400).json({
+        error: 'An engineer with this email already exists'
+      });
+    }
+
+    const existingUser = findUserByEmail(email);
+    if (existingUser && existingUser.engineerId !== req.params.id) {
+      return res.status(400).json({
+        error: 'A user account with this email already exists'
+      });
+    }
+  }
 
   // Validate tier
   const validTiers = ['T1', 'T2', 'T3'];
@@ -169,6 +220,7 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
     email: email !== undefined ? email : engineer.email,
     tier: tier !== undefined ? tier : engineer.tier,
     isFloater: isFloater !== undefined ? isFloater : engineer.isFloater,
+    inTraining: inTraining !== undefined ? inTraining : engineer.inTraining,
     state: state !== undefined ? state : engineer.state,
     preferences: preferences !== undefined ? preferences : engineer.preferences,
     isActive: isActive !== undefined ? isActive : engineer.isActive
@@ -194,6 +246,175 @@ router.delete('/:id', authenticate, requireManager, (req, res) => {
   update('engineers', req.params.id, { isActive: false });
 
   res.json({ message: 'Engineer deactivated successfully' });
+});
+
+/**
+ * POST /api/engineers/:id/reset-password
+ * Reset password for an engineer's user account (admin only)
+ */
+router.post('/:id/reset-password', authenticate, requireAdmin, async (req, res) => {
+  const engineer = getById('engineers', req.params.id);
+
+  if (!engineer) {
+    return res.status(404).json({
+      error: 'Engineer not found'
+    });
+  }
+
+  // Find the user account linked to this engineer
+  const user = findOne('users', u => u.engineerId === req.params.id);
+
+  if (!user) {
+    return res.status(404).json({
+      error: 'No user account linked to this engineer'
+    });
+  }
+
+  const { newPassword, generateNew, sendEmail: shouldSendEmail } = req.body;
+
+  let password = newPassword;
+
+  if (generateNew) {
+    password = generateStrongPassword(16);
+  }
+
+  if (!password) {
+    return res.status(400).json({
+      error: 'Please provide a password or set generateNew to true'
+    });
+  }
+
+  // Validate password strength
+  const validation = validatePasswordStrength(password);
+  if (!validation.valid) {
+    return res.status(400).json({
+      error: 'Password does not meet requirements',
+      details: validation.errors
+    });
+  }
+
+  // Update password
+  const hashedPassword = bcrypt.hashSync(password, 10);
+  update('users', user.id, { password: hashedPassword });
+
+  // Send email if requested and email is available
+  let emailSent = false;
+  if (shouldSendEmail && engineer.email) {
+    try {
+      await sendPasswordEmail({
+        to: engineer.email,
+        name: engineer.name,
+        password,
+        isReset: true
+      });
+      emailSent = true;
+    } catch (error) {
+      console.error('Failed to send password email:', error.message);
+    }
+  }
+
+  res.json({
+    message: 'Password has been reset',
+    generatedPassword: generateNew ? password : undefined,
+    emailSent,
+    userEmail: user.email
+  });
+});
+
+/**
+ * POST /api/engineers/:id/create-user
+ * Create a user account for an engineer (admin only)
+ */
+router.post('/:id/create-user', authenticate, requireAdmin, async (req, res) => {
+  const engineer = getById('engineers', req.params.id);
+
+  if (!engineer) {
+    return res.status(404).json({
+      error: 'Engineer not found'
+    });
+  }
+
+  if (!engineer.email) {
+    return res.status(400).json({
+      error: 'Engineer does not have an email address'
+    });
+  }
+
+  // Check if user already exists
+  const existingUser = findUserByEmail(engineer.email);
+  if (existingUser) {
+    return res.status(400).json({
+      error: 'A user account with this email already exists'
+    });
+  }
+
+  // Also check if any user is already linked to this engineer
+  const linkedUser = findOne('users', u => u.engineerId === req.params.id);
+  if (linkedUser) {
+    return res.status(400).json({
+      error: 'A user account is already linked to this engineer'
+    });
+  }
+
+  const { password, generatePassword, sendEmail: shouldSendEmail, isAdmin } = req.body;
+
+  let userPassword = password;
+  if (generatePassword) {
+    userPassword = generateStrongPassword(16);
+  }
+
+  if (!userPassword) {
+    return res.status(400).json({
+      error: 'Please provide a password or set generatePassword to true'
+    });
+  }
+
+  // Validate password strength
+  const validation = validatePasswordStrength(userPassword);
+  if (!validation.valid) {
+    return res.status(400).json({
+      error: 'Password does not meet requirements',
+      details: validation.errors
+    });
+  }
+
+  // Create user
+  const hashedPassword = bcrypt.hashSync(userPassword, 10);
+  const newUser = create('users', {
+    email: engineer.email,
+    password: hashedPassword,
+    name: engineer.name,
+    role: isAdmin ? 'admin' : 'engineer',
+    engineerId: engineer.id
+  });
+
+  // Send email if requested
+  let emailSent = false;
+  if (shouldSendEmail) {
+    try {
+      await sendPasswordEmail({
+        to: engineer.email,
+        name: engineer.name,
+        password: userPassword,
+        isReset: false
+      });
+      emailSent = true;
+    } catch (error) {
+      console.error('Failed to send password email:', error.message);
+    }
+  }
+
+  res.status(201).json({
+    message: 'User account created successfully',
+    user: {
+      id: newUser.id,
+      email: newUser.email,
+      name: newUser.name,
+      role: newUser.role
+    },
+    generatedPassword: generatePassword ? userPassword : undefined,
+    emailSent
+  });
 });
 
 /**

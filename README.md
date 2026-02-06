@@ -1,17 +1,18 @@
-# ICES-Shifter - Intelligent Constraint-based Engineering Scheduler
+# Shifter for ICES - Intelligent Constraint-based Engineering Scheduler
 
 A comprehensive shift planning application for engineering teams of 19-25 engineers. Built with Node.js/Express backend and React frontend.
 
-**Version 2.0.0**
+**Version Format: YY.WW.D.HH.MM.X** (Year.Week.DayOfWeek.Hour.Minute.Revision)
 
 ## Table of Contents
 
 - [Features](#features)
-- [What's New in v2.0](#whats-new-in-v20)
+- [What's New](#whats-new)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Docker Deployment](#docker-deployment)
 - [User Guide](#user-guide)
+- [Security Features](#security-features)
 - [Scheduling Rules](#scheduling-rules)
 - [Shift Definitions](#shift-definitions)
 - [German Holiday Support](#german-holiday-support)
@@ -28,28 +29,37 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 
 ### Core Scheduling
 - **Constraint-based schedule generation** using a constraint solver approach (not greedy heuristics)
-- Support for multiple shift types: Early, Morning, Late, Night
+- Support for multiple shift types: Early, Morning, Late, Night, Training
 - **Weekend-specific shift preferences** (WeekendEarly, WeekendMorning, WeekendLate, WeekendNight)
 - Different coverage requirements for weekdays vs weekends
 - Core engineers and Floaters (max 2) with different scheduling rules
 - Night shift continuity (2+ consecutive weeks)
 - **Shift consistency rule**: Early/Morning stay together, Late stays consistent, Night stays 2+ weeks
 - Adjacency rules to prevent invalid shift transitions
+- **Shift count display** per day on schedule edit page
 
 ### Engineer Management
 - Engineer profiles with Tier classification (T1, T2, T3)
 - Shift preferences per engineer (weekday and weekend)
-- **Calendar view for unavailability** (sick leave, vacation, personal days)
+- **Availability view** for unavailability (sick leave, vacation, personal days)
 - German state assignment for holiday calculation
 - **Bulk import via CSV and Excel**
 - **Export engineers to CSV/Excel**
 - **Duplicate/copy engineer** for easy creation
+- **In Training flag** - Engineers marked as "In Training" receive:
+  - Training shift Monday-Friday
+  - Automatic OFF on weekends
+  - Purple highlighting (#e6cff2) in schedules
+- **Password management** - Admin can reset passwords with generation and email
 
 ### Schedule Management
 - **Schedule preview** (even for failed/incomplete generation)
 - **Manual shift editing** with validation
+- **Edit published schedules** - Make corrections after publishing
+- **Delete unpublished schedules** - Remove draft schedules
 - **24-month schedule archiving**
 - **Engineer view** (3 months back for engineers, full access for admins)
+- **Latest published schedule on Dashboard** - Quick preview of current shifts
 - Email notifications on schedule publish
 
 ### Request System
@@ -58,39 +68,57 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 - Admin/Manager approval workflow with option cards
 - Approved requests automatically applied to schedules
 
-### Schedule Generation Failures
-When the constraint solver cannot satisfy all rules, the system provides:
-- Detailed error messages explaining conflicts
-- **At least 3 recovery options**
-- **Partial schedule preview** for review
-- **Direct link to manual editing**
+### Security Features
+- **Strong password requirements**:
+  - Minimum 10 characters
+  - At least one special character
+  - At least one number
+  - No common dictionary words
+- **Two-Factor Authentication (2FA)** with TOTP
+- **Account lockout** after 4 failed login attempts
+- **Auto sign-out** after 1 hour of inactivity
+- **8-hour cookie lifetime**
+- **Password change** in user profile
+- **Admin notifications** for locked accounts on dashboard
 
 ### Admin Features
-- **Version management with semantic versioning**
+- **Version management** with new versioning schema (YY.WW.D.HH.MM.X)
 - **Auto-update from GitHub** (works in Docker)
 - **Update check scheduling** (hourly, 8-hourly, daily)
 - **Admin can mark themselves as engineer** to participate in scheduling
-- **Email notification configuration**
+- **SMTP settings configuration** in Admin panel
+- **Create additional admin users**
 - **User management** with notification preferences
+- **Dark mode** per user preference
 
 ---
 
-## What's New in v2.0
+## What's New
 
-### Major Features
-1. **Renamed to ICES-Shifter** (Intelligent Constraint-based Engineering Scheduler)
-2. **Version Management** - Semantic versioning with changelog
-3. **Auto-Update from GitHub** - Check and apply updates from within the admin portal
-4. **Excel Import/Export** - Support for .xlsx files in addition to CSV
-5. **Unavailability Calendar** - Visual calendar to mark sick/vacation days (SAP-ready)
-6. **Schedule Preview** - View partial schedules even when generation fails
-7. **24-Month Archiving** - Historical schedule storage with role-based access
-8. **Manual Shift Editing** - Edit individual shifts with validation
-9. **Admin-as-Engineer** - Link admin/manager accounts to engineer profiles
-10. **Email Notifications** - Notify users when schedules change
-11. **Engineer Schedule View** - Engineers can view their schedules directly
-12. **Shift Consistency Rule** - Maintains shift type consistency week-to-week
-13. **Weekend Shift Preferences** - Separate preferences for weekend shifts
+### Latest Features
+1. **Renamed to "Shifter for ICES"** - New branding with styled header
+2. **New Versioning Schema** - Format: YY.WW.D.HH.MM.X (e.g., 26.6.5.18.30.1)
+3. **Two-Factor Authentication** - TOTP-based 2FA for enhanced security
+4. **Strong Password Policy** - 10+ characters, special chars, numbers, no dictionary words
+5. **Account Lockout** - Locks after 4 failed attempts, admin unlock required
+6. **Auto Sign-out** - Automatic logout after 1 hour inactivity
+7. **Dark Mode** - Per-user dark mode preference
+8. **Training Engineers** - "In Training" flag with automatic shift assignment
+9. **Password Management** - Reset passwords with generation and email delivery
+10. **Edit Published Schedules** - Make corrections after publishing
+11. **Delete Unpublished Schedules** - Remove draft schedules
+12. **Shift Counts** - View shift count per day on schedule edit page
+13. **Latest Schedule Preview** - Dashboard shows current published schedule
+14. **SMTP Settings** - Configure email in Admin panel
+15. **Availability View** - Renamed from "Calendar" for clarity
+16. **Unique Email Validation** - Prevent duplicate engineer emails
+17. **Admin Creation** - Create additional admin users
+18. **Locked Account Alerts** - Admins see locked accounts on dashboard
+
+### Scheduling Rule Improvements
+- **2 consecutive OFF days** per 7-day period (Mon-Sun)
+- **Maximum 6 consecutive work days** enforcement
+- **Training shift support** with automatic weekend OFF
 
 ---
 
@@ -117,7 +145,9 @@ npm run dev
 
 | Role | Email | Password |
 |------|-------|----------|
-| Admin | admin@example.com | admin123 |
+| Admin | admin@example.com | Admin123!@# |
+
+**Note:** Password must meet strong password requirements (10+ chars, special char, number).
 
 ---
 
@@ -133,7 +163,7 @@ npm run dev
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd ices-shifter
+cd shifter-for-ices
 
 # Install server dependencies
 npm install
@@ -170,7 +200,7 @@ The application runs as two containers:
 ### Architecture
 ```
 ┌─────────────────┐         ┌─────────────────┐
-│   Web (nginx)   │────────▶│   API (Node)    │
+│   Web (nginx)   │────────>│   API (Node)    │
 │    Port 80      │  /api   │   Port 3001     │
 └─────────────────┘         └─────────────────┘
         │                           │
@@ -199,6 +229,8 @@ The application will be available at `http://localhost`
 | `PORT` | 3001 | API server port |
 | `NODE_ENV` | production | Environment mode |
 | `JWT_SECRET` | (default) | Secret for JWT tokens (**change in production!**) |
+| `SESSION_TIMEOUT` | 3600000 | Session timeout in ms (default: 1 hour) |
+| `COOKIE_LIFETIME` | 28800000 | Cookie lifetime in ms (default: 8 hours) |
 | `SMTP_HOST` | - | SMTP server for email notifications |
 | `SMTP_PORT` | 587 | SMTP port |
 | `SMTP_USER` | - | SMTP username |
@@ -224,9 +256,9 @@ Data is stored in `/app/server/data/storage` inside the API container.
 
 | Role | Permissions |
 |------|-------------|
-| **Admin** | Full access: manage engineers, schedules, approve requests, system settings, auto-update |
+| **Admin** | Full access: manage engineers, schedules, approve requests, system settings, auto-update, create admins, unlock accounts |
 | **Manager** | Manage engineers, generate/publish schedules, approve/reject requests |
-| **Engineer** | View schedules (3 months back), submit requests, update own preferences |
+| **Engineer** | View schedules (3 months back), submit requests, update own preferences, change password |
 
 ### Workflow
 
@@ -235,10 +267,11 @@ Data is stored in `/app/server/data/storage` inside the API container.
    - Assign German state for holiday calculation
    - Set shift preferences (weekday AND weekend)
    - Designate floaters (max 2)
+   - Mark engineers "In Training" if applicable
    - Import via CSV/Excel for bulk setup
 
 2. **Mark Unavailability** (Admin/Manager/Engineer)
-   - Use calendar view to mark sick/vacation days
+   - Use Availability view to mark sick/vacation days
    - Select date range and unavailability type
    - Future: Sync with SAP WFM
 
@@ -259,15 +292,53 @@ Data is stored in `/app/server/data/storage` inside the API container.
      - View partial schedule preview
      - Choose recovery option OR
      - Edit manually
+   - View shift counts per day
 
 6. **Publish Schedule** (Manager/Admin)
    - Review generated schedule
    - Publish to make visible to all engineers
    - Email notifications sent automatically
+   - Can edit published schedules if corrections needed
 
 7. **View Schedule** (All Users)
    - Engineers see "My Schedule" with their shifts highlighted
    - Admins/Managers see full management view
+   - Dashboard shows latest published schedule preview
+
+---
+
+## Security Features
+
+### Strong Password Policy
+Passwords must meet the following requirements:
+- Minimum 10 characters
+- At least one special character (!@#$%^&*_+-=, etc.)
+- At least one number
+- No common dictionary words (password, admin, user, etc.)
+
+### Two-Factor Authentication (2FA)
+- TOTP-based authentication using apps like Google Authenticator
+- Setup via Profile page
+- Required on login after activation
+- Can be disabled by admin if user loses access
+
+### Account Lockout
+- Account locks after 4 failed login attempts
+- Locked accounts display notification to admins on Dashboard
+- Admin can unlock accounts from the Dashboard
+- Prevents brute-force password attacks
+
+### Session Security
+- Auto sign-out after 1 hour of inactivity
+- Cookie lifetime of 8 hours
+- JWT-based authentication
+- Activity tracking resets timeout on user actions
+
+### Password Management
+- Users can change their password in Profile
+- Admins can reset engineer passwords
+- Option to generate strong password automatically
+- Option to send new password via email
 
 ---
 
@@ -280,15 +351,15 @@ Data is stored in `/app/server/data/storage` inside the API container.
    - Unavailable days shown explicitly as "Unavailable"
 
 2. **OFF Days**
-   - Every core engineer: exactly 2 OFF days per Mon-Sun week
+   - Every core engineer: exactly 2 consecutive OFF days per Mon-Sun week
    - Unavailable days do NOT count as OFF
    - OFF days must be explicitly scheduled
+   - Maximum 6 consecutive working days
 
 3. **Weekly Workload** (Core Engineers)
    - No vacation in week → minimum 5 shifts
    - With vacation → 5-shift minimum suspended
    - Maximum 6 shifts (only for transitions)
-   - Maximum 5 consecutive working days
 
 4. **One Shift Per Day**
    - No engineer may work more than one shift per day
@@ -320,13 +391,20 @@ Data is stored in `/app/server/data/storage` inside the API container.
    - Early → Night (forbidden)
    - Morning → Night (forbidden)
 
+9. **Training Engineers**
+   - Engineers marked "In Training" receive:
+     - Training shift Monday-Friday
+     - OFF on Saturday and Sunday
+     - Exempt from normal scheduling rules
+     - Purple highlighting (#e6cff2) in views
+
 ### Soft Constraints (Preferences)
 
-9. **Shift Consistency** (NEW in v2.0)
-   - Early/Morning shifts stay together week-to-week
-   - Late shifts stay consistent week-to-week
-   - Night shifts stay consistent for 2+ weeks
-   - Helps maintain work-life balance and sleep patterns
+10. **Shift Consistency**
+    - Early/Morning shifts stay together week-to-week
+    - Late shifts stay consistent week-to-week
+    - Night shifts stay consistent for 2+ weeks
+    - Helps maintain work-life balance and sleep patterns
 
 ---
 
@@ -339,6 +417,7 @@ Data is stored in `/app/server/data/storage` inside the API container.
 | Morning | 10:00 | 18:30 | 8.5 hours |
 | Late | 15:00 | 23:30 | 8.5 hours |
 | Night | 23:00 | 07:30 | 8.5 hours |
+| Training | 09:00 | 17:30 | 8.5 hours |
 
 ### Weekend Shifts
 | Shift | Start | End | Duration |
@@ -410,7 +489,7 @@ This allows, for example, an engineer to work Morning during the week but only N
 
 Base URL: `http://localhost:3001/api`
 
-### System Endpoints (NEW in v2.0)
+### System Endpoints
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
@@ -423,18 +502,28 @@ Base URL: `http://localhost:3001/api`
 | GET | `/system/settings` | Get system settings | Admin |
 | PUT | `/system/settings` | Update settings | Admin |
 | GET | `/system/email-config` | Get email config status | Admin |
+| GET | `/system/smtp-settings` | Get SMTP settings | Admin |
+| PUT | `/system/smtp-settings` | Update SMTP settings | Admin |
 | GET | `/system/users` | List all users | Admin |
 | PUT | `/system/users/:id/notifications` | Update email prefs | Yes |
 | PUT | `/system/users/:id/engineer-link` | Link user to engineer | Admin |
+| GET | `/system/locked-accounts` | Get locked accounts | Admin |
+| POST | `/system/unlock-account/:userId` | Unlock user account | Admin |
 
 ### Authentication
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
 | POST | `/auth/login` | Login with email/password | No |
+| POST | `/auth/login/2fa` | Complete 2FA login | No |
 | POST | `/auth/register` | Register new user | No |
 | GET | `/auth/me` | Get current user info | Yes |
-| POST | `/auth/change-password` | Change password | Yes |
+| POST | `/auth/change-password` | Change own password | Yes |
+| POST | `/auth/2fa/setup` | Setup 2FA | Yes |
+| POST | `/auth/2fa/verify` | Verify and enable 2FA | Yes |
+| POST | `/auth/2fa/disable` | Disable 2FA | Yes |
+| POST | `/auth/admin/create` | Create admin user | Admin |
+| POST | `/auth/admin/reset-password` | Reset user password | Admin |
 
 ### Engineers
 
@@ -448,11 +537,15 @@ Base URL: `http://localhost:3001/api`
 | POST | `/engineers/:id/duplicate` | Duplicate engineer | Manager |
 | PUT | `/engineers/:id/preferences` | Update shift preferences | Yes* |
 | PUT | `/engineers/:id/unavailable` | Update unavailable days | Yes* |
+| GET | `/engineers/:id/availability` | Get availability page | Yes* |
 | GET | `/engineers/:id/unavailable-dates` | Get unavailable dates (detailed) | Yes* |
 | POST | `/engineers/:id/unavailable-dates` | Add unavailable dates | Yes* |
 | DELETE | `/engineers/:id/unavailable-dates` | Remove unavailable dates | Yes* |
 | GET | `/engineers/:id/holidays` | Get holidays for engineer | Yes |
+| POST | `/engineers/:id/reset-password` | Reset engineer password | Admin |
+| POST | `/engineers/:id/create-account` | Create user account for engineer | Admin |
 | GET | `/engineers/states` | List German states | No |
+| GET | `/engineers/check-email/:email` | Check email uniqueness | Manager |
 | POST | `/engineers/bulk-upload` | Bulk upload from CSV | Manager |
 | POST | `/engineers/bulk-upload-excel` | Bulk upload from Excel | Manager |
 | GET | `/engineers/export/csv` | Export engineers as CSV | Manager |
@@ -472,12 +565,14 @@ Base URL: `http://localhost:3001/api`
 | GET | `/schedules/month/:year/:month` | Get schedule for month | Yes |
 | GET | `/schedules/engineer-view/:year/:month` | Engineer schedule view | Yes |
 | GET | `/schedules/archived` | List archived schedules | Manager |
+| GET | `/schedules/latest-published` | Get latest published schedule | Yes |
 | POST | `/schedules/generate` | Generate new schedule | Manager |
 | POST | `/schedules/generate-with-option` | Generate with recovery option | Manager |
 | PUT | `/schedules/:id` | Update schedule (full data) | Manager |
 | PUT | `/schedules/:id/shift` | Update single shift | Manager |
 | POST | `/schedules/:id/publish` | Publish schedule | Manager |
 | POST | `/schedules/:id/archive` | Archive schedule | Manager |
+| DELETE | `/schedules/:id` | Delete unpublished schedule | Manager |
 | GET | `/schedules/:id/export` | Export schedule data | Yes |
 | GET | `/schedules/holidays/:year/:month` | Get holidays for month | Yes |
 
@@ -501,49 +596,49 @@ Base URL: `http://localhost:3001/api`
 ## Project Structure
 
 ```
-ices-shifter/
+shifter-for-ices/
 ├── server/
 │   ├── index.js                 # Express server entry point
 │   ├── routes/
-│   │   ├── auth.js              # Authentication endpoints
+│   │   ├── auth.js              # Authentication endpoints (2FA, password)
 │   │   ├── engineers.js         # Engineer management
 │   │   ├── schedules.js         # Schedule generation & management
 │   │   ├── requests.js          # Request handling
-│   │   └── system.js            # System/admin endpoints (NEW)
+│   │   └── system.js            # System/admin endpoints
 │   ├── services/
 │   │   ├── constraintSolver.js  # Core scheduling algorithm
 │   │   ├── germanHolidays.js    # Holiday calculations
-│   │   └── emailService.js      # Email notifications (NEW)
+│   │   └── emailService.js      # Email notifications
 │   ├── middleware/
-│   │   └── auth.js              # JWT authentication middleware
+│   │   └── auth.js              # JWT auth, password validation, lockout
 │   └── data/
 │       ├── store.js             # JSON data store operations
 │       └── storage/             # Persisted data (gitignored)
 ├── client/
 │   ├── src/
-│   │   ├── App.jsx              # Main React app with routing
+│   │   ├── App.jsx              # Main React app (dark mode, session timeout)
 │   │   ├── main.jsx             # React entry point
 │   │   ├── styles.css           # Global styles
 │   │   ├── pages/
-│   │   │   ├── Login.jsx        # Login page
-│   │   │   ├── Dashboard.jsx    # Admin dashboard
-│   │   │   ├── Engineers.jsx    # Engineer management
-│   │   │   ├── EngineerUnavailability.jsx # Unavailability calendar (NEW)
+│   │   │   ├── Login.jsx        # Login page (2FA support)
+│   │   │   ├── Dashboard.jsx    # Dashboard (latest schedule, locked accounts)
+│   │   │   ├── Engineers.jsx    # Engineer management (training, passwords)
+│   │   │   ├── EngineerUnavailability.jsx # Availability view
 │   │   │   ├── Schedules.jsx    # Schedule generation
 │   │   │   ├── ScheduleView.jsx # Schedule grid view
-│   │   │   ├── ScheduleEdit.jsx # Manual schedule editing (NEW)
-│   │   │   ├── MySchedule.jsx   # Engineer schedule view (NEW)
+│   │   │   ├── ScheduleEdit.jsx # Manual editing (shift counts)
+│   │   │   ├── MySchedule.jsx   # Engineer schedule view
 │   │   │   ├── Requests.jsx     # Admin request approval
 │   │   │   ├── MyRequests.jsx   # Engineer request submission
-│   │   │   ├── Profile.jsx      # User profile & preferences
-│   │   │   └── AdminSettings.jsx # Admin settings (NEW)
+│   │   │   ├── Profile.jsx      # Profile (2FA, password change, dark mode)
+│   │   │   └── AdminSettings.jsx # Admin settings (SMTP)
 │   │   └── services/
 │   │       └── api.js           # API client
 │   ├── index.html
 │   ├── vite.config.js
 │   ├── Dockerfile               # Client container (nginx)
 │   └── nginx.conf               # Nginx configuration
-├── version.json                 # Version information (NEW)
+├── version.json                 # Version information
 ├── Dockerfile                   # API server container
 ├── docker-compose.yml           # Multi-container setup
 ├── package.json
@@ -559,13 +654,13 @@ ices-shifter/
 ### Version Management
 
 The Admin Settings page (`/admin`) shows:
-- Current version number
+- Current version number (format: YY.WW.D.HH.MM.X)
 - Release date
 - Full changelog
 
 ### Auto-Update
 
-ICES-Shifter can update itself from GitHub:
+Shifter for ICES can update itself from GitHub:
 
 1. Navigate to Admin Settings
 2. Click "Check for Updates"
@@ -582,12 +677,30 @@ Configure automatic update checks:
 - **Daily**: Recommended for most deployments
 - **Disabled**: Manual checks only
 
+### SMTP Configuration
+
+Configure email settings in Admin panel:
+- SMTP Host and Port
+- Username and Password
+- From address
+- TLS/SSL settings
+- Test email functionality
+
 ### Email Notifications
 
-When configured (via SMTP environment variables):
+When SMTP is configured:
 - Engineers receive notifications when schedules are published
 - Engineers receive notifications when their schedule changes
+- Password reset emails for engineers
 - Users can opt-out via their profile
+
+### User Management
+
+Admins can:
+- Create additional admin users
+- Reset user passwords
+- Unlock locked accounts
+- View failed login notifications
 
 ### Admin as Engineer
 
@@ -595,6 +708,13 @@ Admins/Managers can link their account to an engineer profile, allowing them to:
 - Appear in shift schedules
 - Submit their own time-off requests
 - View their personal schedule
+
+### Dark Mode
+
+Users can enable dark mode:
+- Toggle in Profile page
+- Preference stored per user
+- Persists across sessions
 
 ---
 
@@ -616,9 +736,11 @@ node seed-test-data.js
 
 | Role | Email | Password |
 |------|-------|----------|
-| Admin | admin@example.com | admin123 |
-| Manager | sophie.weber@example.com | manager123 |
-| Engineer | leon.fischer@example.com | password123 |
+| Admin | admin@example.com | Admin123!@# |
+| Manager | sophie.weber@example.com | Manager123!@# |
+| Engineer | leon.fischer@example.com | Engineer123!@# |
+
+**Note:** Passwords must meet strong password requirements.
 
 ---
 
@@ -643,16 +765,30 @@ docker-compose build --no-cache
 - Check that enough engineers can work Night shifts (minimum 2)
 - Verify engineers have shift preferences set
 - Review the error messages and use the preview feature
+- Check for too many engineers marked as "In Training"
 
 **Login issues**
-- Default admin: `admin@example.com` / `admin123`
-- JWT tokens expire after 24 hours
-- Clear browser localStorage and try again
+- Default admin: `admin@example.com` / `Admin123!@#`
+- Account may be locked after 4 failed attempts
+- Check Dashboard for locked account notifications
+- 2FA may be enabled - use authenticator app
+- Session expires after 1 hour of inactivity
+
+**Account locked**
+- Admin can unlock from Dashboard
+- Look for "Locked Accounts" alert
+- Click "Unlock" button for affected user
 
 **Email notifications not working**
-- Check SMTP environment variables are set
-- Verify SMTP credentials are correct
-- Check email spam folder
+- Configure SMTP settings in Admin panel
+- Check SMTP credentials are correct
+- Verify email spam folder
+- Test email from Admin settings
+
+**2FA issues**
+- Ensure device time is synchronized
+- Use a standard TOTP app (Google Authenticator, Authy)
+- Admin can disable 2FA for a user if needed
 
 ### Logs
 

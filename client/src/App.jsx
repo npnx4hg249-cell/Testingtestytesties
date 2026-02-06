@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import api from './services/api';
 
@@ -16,6 +16,9 @@ import MyRequests from './pages/MyRequests';
 import Profile from './pages/Profile';
 import AdminSettings from './pages/AdminSettings';
 
+// Session timeout: 1 hour
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000;
+
 // Auth Context
 const AuthContext = createContext(null);
 
@@ -26,22 +29,89 @@ export function useAuth() {
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
+  const [lastActivity, setLastActivity] = useState(Date.now());
+
+  // Load dark mode preference
+  useEffect(() => {
+    const savedDarkMode = localStorage.getItem('darkMode');
+    if (savedDarkMode !== null) {
+      setDarkMode(savedDarkMode === 'true');
+    }
+  }, []);
+
+  // Apply dark mode to document
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark-mode');
+    } else {
+      document.documentElement.classList.remove('dark-mode');
+    }
+  }, [darkMode]);
+
+  // Session timeout check
+  useEffect(() => {
+    if (!user) return;
+
+    const checkSession = () => {
+      if (Date.now() - lastActivity > SESSION_TIMEOUT_MS) {
+        api.logout();
+        setUser(null);
+        alert('Your session has expired due to inactivity. Please log in again.');
+      }
+    };
+
+    const interval = setInterval(checkSession, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [user, lastActivity]);
+
+  // Track user activity
+  useEffect(() => {
+    const updateActivity = () => setLastActivity(Date.now());
+
+    window.addEventListener('click', updateActivity);
+    window.addEventListener('keypress', updateActivity);
+    window.addEventListener('scroll', updateActivity);
+
+    return () => {
+      window.removeEventListener('click', updateActivity);
+      window.removeEventListener('keypress', updateActivity);
+      window.removeEventListener('scroll', updateActivity);
+    };
+  }, []);
 
   useEffect(() => {
     const token = api.getToken();
     if (token) {
       api.getCurrentUser()
-        .then(setUser)
-        .catch(() => api.logout())
+        .then(userData => {
+          setUser(userData);
+          if (userData.darkMode !== undefined) {
+            setDarkMode(userData.darkMode);
+          }
+        })
+        .catch((error) => {
+          if (error.code === 'SESSION_TIMEOUT') {
+            alert('Your session has expired. Please log in again.');
+          }
+          api.logout();
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
     }
   }, []);
 
-  const login = async (email, password) => {
-    const data = await api.login(email, password);
+  const login = async (email, password, totpCode) => {
+    const data = await api.login(email, password, totpCode);
+    if (data.requiresTwoFactor) {
+      return data; // Return early for 2FA prompt
+    }
     setUser(data.user);
+    if (data.user.darkMode !== undefined) {
+      setDarkMode(data.user.darkMode);
+    }
+    setLastActivity(Date.now());
     return data;
   };
 
@@ -50,10 +120,31 @@ function AuthProvider({ children }) {
     setUser(null);
   };
 
+  const toggleDarkMode = useCallback(async () => {
+    const newDarkMode = !darkMode;
+    setDarkMode(newDarkMode);
+    localStorage.setItem('darkMode', String(newDarkMode));
+
+    // Save to server if logged in
+    if (user) {
+      try {
+        await api.request('/auth/preferences', {
+          method: 'PUT',
+          body: JSON.stringify({ darkMode: newDarkMode })
+        });
+      } catch (error) {
+        console.error('Failed to save dark mode preference:', error);
+      }
+    }
+  }, [darkMode, user]);
+
   const value = {
     user,
+    setUser,
     login,
     logout,
+    darkMode,
+    toggleDarkMode,
     isManager: user?.role === 'admin' || user?.role === 'manager',
     isAdmin: user?.role === 'admin'
   };
@@ -98,7 +189,7 @@ function ManagerRoute({ children }) {
 }
 
 function Header() {
-  const { user, logout, isManager } = useAuth();
+  const { user, logout, isManager, isAdmin, darkMode, toggleDarkMode } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -109,13 +200,11 @@ function Header() {
 
   const isActive = (path) => location.pathname === path ? 'active' : '';
 
-  const { isAdmin } = useAuth();
-
   return (
     <header className="header">
-      <h1>
-        <span>📅</span>
-        ICES-Shifter
+      <h1 style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+        <span style={{ marginRight: '8px' }}>Shifter</span>
+        <span style={{ fontSize: '0.5em', opacity: 0.8 }}>for ICES</span>
       </h1>
       <nav>
         {isManager && (
@@ -133,7 +222,22 @@ function Header() {
           <Link to="/admin" className={isActive('/admin')}>Admin</Link>
         )}
       </nav>
-      <div className="user-info">
+      <div className="user-info" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <button
+          onClick={toggleDarkMode}
+          className="btn btn-sm"
+          style={{
+            background: 'transparent',
+            border: '1px solid rgba(255,255,255,0.3)',
+            color: 'white',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            cursor: 'pointer'
+          }}
+          title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+        >
+          {darkMode ? '☀️' : '🌙'}
+        </button>
         <span>{user?.name} ({user?.role})</span>
         <button className="btn btn-outline" onClick={handleLogout} style={{ color: 'white', borderColor: 'rgba(255,255,255,0.5)' }}>
           Logout
@@ -167,7 +271,7 @@ function AppRoutes() {
       {/* Manager routes */}
       <Route path="/" element={<ManagerRoute><Dashboard /></ManagerRoute>} />
       <Route path="/engineers" element={<ManagerRoute><Engineers /></ManagerRoute>} />
-      <Route path="/engineers/:id/unavailability" element={<ManagerRoute><EngineerUnavailability /></ManagerRoute>} />
+      <Route path="/engineers/:id/availability" element={<ManagerRoute><EngineerUnavailability /></ManagerRoute>} />
       <Route path="/schedules" element={<ManagerRoute><Schedules /></ManagerRoute>} />
       <Route path="/schedules/:id" element={<PrivateRoute><ScheduleView /></PrivateRoute>} />
       <Route path="/schedules/:id/edit" element={<ManagerRoute><ScheduleEdit /></ManagerRoute>} />

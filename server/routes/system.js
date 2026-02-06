@@ -15,7 +15,8 @@ const router = Router();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const VERSION_FILE = join(__dirname, '../../version.json');
+const PROJECT_ROOT = join(__dirname, '../..');
+const VERSION_FILE = join(PROJECT_ROOT, 'version.json');
 
 // Update check configuration storage
 let updateCheckConfig = {
@@ -54,12 +55,52 @@ router.get('/version', (req, res) => {
  */
 router.get('/version/full', authenticate, requireAdmin, (req, res) => {
   try {
+    if (!existsSync(VERSION_FILE)) {
+      return res.json(getDefaultVersionInfo());
+    }
     const versionData = JSON.parse(readFileSync(VERSION_FILE, 'utf-8'));
     res.json(versionData);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to read version file' });
+    console.error('Error reading version file:', error);
+    res.json(getDefaultVersionInfo());
   }
 });
+
+/**
+ * Get default version info when file is not available
+ */
+function getDefaultVersionInfo() {
+  const now = new Date();
+  const version = generateVersionNumber(now);
+  return {
+    version,
+    name: 'Shifter',
+    subtitle: 'for ICES',
+    description: 'Intelligent Constraint-based Engineering Scheduler',
+    releaseDate: now.toISOString().split('T')[0],
+    changelog: []
+  };
+}
+
+/**
+ * Generate version number in format: YY.WW.D.HH.MM.X
+ * YY = last 2 digits of year
+ * WW = calendar week
+ * D = day of week (1-7)
+ * HH = hour
+ * MM = minute
+ * X = sequence number (always 1 for new versions)
+ */
+function generateVersionNumber(date = new Date()) {
+  const year = date.getFullYear().toString().slice(-2);
+  const startOfYear = new Date(date.getFullYear(), 0, 1);
+  const days = Math.floor((date - startOfYear) / (24 * 60 * 60 * 1000));
+  const week = Math.ceil((days + startOfYear.getDay() + 1) / 7);
+  const dayOfWeek = date.getDay() || 7; // 1-7, Sunday becomes 7
+  const hour = date.getHours();
+  const minute = date.getMinutes();
+  return `${year}.${week}.${dayOfWeek}.${hour}.${minute}.1`;
+}
 
 /**
  * GET /api/system/update-status
@@ -176,12 +217,83 @@ router.put('/settings', authenticate, requireAdmin, (req, res) => {
  * Get email configuration status (admin only)
  */
 router.get('/email-config', authenticate, requireAdmin, (req, res) => {
+  const settings = getSettings();
+  const smtpSettings = settings.smtp || {};
+
   res.json({
-    configured: !!process.env.SMTP_HOST,
-    host: process.env.SMTP_HOST ? '****' : null,
-    port: process.env.SMTP_PORT || 587,
-    secure: process.env.SMTP_SECURE === 'true'
+    configured: !!(smtpSettings.host || process.env.SMTP_HOST),
+    host: smtpSettings.host || process.env.SMTP_HOST || null,
+    port: smtpSettings.port || process.env.SMTP_PORT || 587,
+    secure: smtpSettings.secure ?? (process.env.SMTP_SECURE === 'true'),
+    from: smtpSettings.from || process.env.SMTP_FROM || null,
+    user: smtpSettings.user ? '****' : null
   });
+});
+
+/**
+ * PUT /api/system/smtp-settings
+ * Update SMTP settings (admin only)
+ */
+router.put('/smtp-settings', authenticate, requireAdmin, (req, res) => {
+  const { host, port, secure, user, pass, from } = req.body;
+
+  const settings = getSettings();
+  settings.smtp = {
+    host: host || '',
+    port: parseInt(port) || 587,
+    secure: !!secure,
+    user: user || '',
+    pass: pass || settings.smtp?.pass || '', // Don't overwrite if not provided
+    from: from || ''
+  };
+
+  updateSettings(settings);
+
+  res.json({
+    message: 'SMTP settings updated',
+    configured: !!host,
+    host: host || null,
+    port: settings.smtp.port,
+    secure: settings.smtp.secure,
+    from: settings.smtp.from
+  });
+});
+
+/**
+ * POST /api/system/test-email
+ * Send a test email (admin only)
+ */
+router.post('/test-email', authenticate, requireAdmin, async (req, res) => {
+  const { to } = req.body;
+
+  if (!to) {
+    return res.status(400).json({ error: 'Recipient email is required' });
+  }
+
+  try {
+    const { sendEmail } = await import('../services/emailService.js');
+    await sendEmail({
+      to,
+      subject: 'Shifter for ICES - Test Email',
+      text: 'This is a test email from Shifter for ICES. If you received this, your email configuration is working correctly.',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Test Email</h2>
+          <p>This is a test email from <strong>Shifter for ICES</strong>.</p>
+          <p>If you received this, your email configuration is working correctly.</p>
+          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+          <p style="color: #666; font-size: 12px;">Sent from Shifter for ICES Admin Panel</p>
+        </div>
+      `
+    });
+
+    res.json({ message: 'Test email sent successfully' });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to send test email',
+      details: error.message
+    });
+  }
 });
 
 /**

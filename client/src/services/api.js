@@ -1,5 +1,5 @@
 /**
- * API Service for ICES-Shifter
+ * API Service for Shifter for ICES
  */
 
 const API_BASE = '/api';
@@ -44,6 +44,7 @@ class ApiService {
       const error = new Error(data.error || 'An error occurred');
       error.status = response.status;
       error.data = data;
+      error.code = data.code;
       throw error;
     }
 
@@ -51,12 +52,14 @@ class ApiService {
   }
 
   // Auth
-  async login(email, password) {
+  async login(email, password, totpCode) {
     const data = await this.request('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ email, password, totpCode })
     });
-    this.setToken(data.token);
+    if (data.token) {
+      this.setToken(data.token);
+    }
     return data;
   }
 
@@ -332,6 +335,20 @@ class ApiService {
     return this.request('/system/email-config');
   }
 
+  async updateSmtpSettings(settings) {
+    return this.request('/system/smtp-settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings)
+    });
+  }
+
+  async sendTestEmail(to) {
+    return this.request('/system/test-email', {
+      method: 'POST',
+      body: JSON.stringify({ to })
+    });
+  }
+
   async getUsers() {
     return this.request('/system/users');
   }
@@ -348,6 +365,103 @@ class ApiService {
       method: 'PUT',
       body: JSON.stringify({ engineerId })
     });
+  }
+
+  // Password management
+  async generatePassword() {
+    return this.request('/auth/generate-password', { method: 'POST' });
+  }
+
+  async changePassword(currentPassword, newPassword) {
+    return this.request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+  }
+
+  async adminResetPassword(userId, newPassword, generateNew, sendEmail) {
+    return this.request('/auth/admin/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ userId, newPassword, generateNew, sendEmail })
+    });
+  }
+
+  // 2FA
+  async setup2FA() {
+    return this.request('/auth/2fa/setup', { method: 'POST' });
+  }
+
+  async verify2FA(code) {
+    return this.request('/auth/2fa/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code })
+    });
+  }
+
+  async disable2FA(password) {
+    return this.request('/auth/2fa/disable', {
+      method: 'POST',
+      body: JSON.stringify({ password })
+    });
+  }
+
+  // Locked accounts
+  async getLockedAccounts() {
+    return this.request('/auth/locked-accounts');
+  }
+
+  async unlockAccount(email) {
+    return this.request('/auth/unlock-account', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+  }
+
+  // Admin user management
+  async createAdmin(email, name, password, generatePassword) {
+    return this.request('/auth/admin/create-admin', {
+      method: 'POST',
+      body: JSON.stringify({ email, name, password, generatePassword })
+    });
+  }
+
+  async toggleUserAdmin(userId, isAdmin) {
+    return this.request(`/auth/admin/user/${userId}/admin`, {
+      method: 'PUT',
+      body: JSON.stringify({ isAdmin })
+    });
+  }
+
+  async adminManage2FA(userId, action) {
+    return this.request(`/auth/admin/user/${userId}/2fa`, {
+      method: 'PUT',
+      body: JSON.stringify({ action })
+    });
+  }
+
+  // Engineer password management
+  async resetEngineerPassword(engineerId, newPassword, generateNew, sendEmail) {
+    return this.request(`/engineers/${engineerId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ newPassword, generateNew, sendEmail })
+    });
+  }
+
+  async createEngineerUser(engineerId, password, generatePassword, sendEmail, isAdmin) {
+    return this.request(`/engineers/${engineerId}/create-user`, {
+      method: 'POST',
+      body: JSON.stringify({ password, generatePassword, sendEmail, isAdmin })
+    });
+  }
+
+  // Latest published schedule
+  async getLatestPublishedSchedule() {
+    return this.request('/schedules/latest-published');
+  }
+
+  // Delete schedule
+  async deleteSchedule(id) {
+    return this.request(`/schedules/${id}`, { method: 'DELETE' });
   }
 }
 

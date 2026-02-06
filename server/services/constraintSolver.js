@@ -23,8 +23,9 @@ export const SHIFTS = {
   MORNING: 'Morning',
   LATE: 'Late',
   NIGHT: 'Night',
-  OFF: 'OFF',
-  UNAVAILABLE: 'Unavailable'
+  OFF: 'Off',
+  UNAVAILABLE: 'Unavailable',
+  TRAINING: 'Training'
 };
 
 // Shift times
@@ -72,9 +73,16 @@ export const COLORS = {
     [SHIFTS.LATE]: { bg: '#6fa8dc', text: '#ffffff' },
     [SHIFTS.NIGHT]: { bg: '#1155cc', text: '#ffffff' },
     [SHIFTS.OFF]: { bg: '#5a3286', text: '#ffffff' },
-    [SHIFTS.UNAVAILABLE]: { bg: '#b6d7a8', text: '#000000' }
+    [SHIFTS.UNAVAILABLE]: { bg: '#b6d7a8', text: '#000000' },
+    [SHIFTS.TRAINING]: { bg: '#e6cff2', text: '#000000' }
   }
 };
+
+// Maximum consecutive working days before requiring OFF days
+const MAX_CONSECUTIVE_WORK_DAYS = 6;
+
+// Minimum OFF days per 7-day period (must be consecutive)
+const MIN_OFF_DAYS_PER_WEEK = 2;
 
 // Forbidden transitions (adjacency rules)
 const FORBIDDEN_TRANSITIONS = [
@@ -350,8 +358,11 @@ export class ShiftScheduler {
     this.violations = [];
     this.warnings = [];
 
-    const coreEngineers = this.engineers.filter(e => !e.isFloater);
-    const floaters = this.engineers.filter(e => e.isFloater);
+    // Separate engineers by type
+    const trainingEngineers = this.engineers.filter(e => e.inTraining);
+    const regularEngineers = this.engineers.filter(e => !e.inTraining);
+    const coreEngineers = regularEngineers.filter(e => !e.isFloater);
+    const floaters = regularEngineers.filter(e => e.isFloater);
 
     if (floaters.length > 2) {
       this.violations.push({
@@ -365,6 +376,10 @@ export class ShiftScheduler {
 
     // Initialize schedule
     let schedule = this.initializeSchedule();
+
+    // Step 0: Assign training engineers (Mon-Fri Training shift, Sat-Sun Off)
+    const trainingResult = this.assignTrainingShifts(schedule, trainingEngineers, days);
+    schedule = trainingResult.schedule;
 
     // Step 1: Assign night shifts first (need continuity)
     const nightResult = this.assignNightShifts(schedule, coreEngineers, days, weeks);
@@ -406,6 +421,31 @@ export class ShiftScheduler {
       warnings: this.warnings,
       stats: this.calculateStats(schedule, days, weeks)
     };
+  }
+
+  /**
+   * Assign training shifts for engineers in training
+   * Training engineers work Mon-Fri on Training shift, with Sat-Sun Off
+   */
+  assignTrainingShifts(schedule, trainingEngineers, days) {
+    for (const engineer of trainingEngineers) {
+      for (const day of days) {
+        const dateStr = format(day, 'yyyy-MM-dd');
+        const dayOfWeek = getDay(day);
+
+        // Skip if already assigned (e.g., unavailable)
+        if (schedule[engineer.id][dateStr] !== null) continue;
+
+        // Saturday = 6, Sunday = 0
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+          schedule[engineer.id][dateStr] = SHIFTS.OFF;
+        } else {
+          schedule[engineer.id][dateStr] = SHIFTS.TRAINING;
+        }
+      }
+    }
+
+    return { success: true, schedule };
   }
 
   /**
@@ -619,18 +659,32 @@ export class ShiftScheduler {
   }
 
   /**
-   * Assign OFF days to ensure exactly 2 per week per engineer
+   * Assign OFF days to ensure exactly 2 consecutive days off per week per engineer
+   * Also ensures no more than 6 consecutive working days
    */
   assignOffDays(schedule, engineers, days, weeks) {
     const errors = [];
 
     for (const engineer of engineers) {
+      // Skip training engineers - they have fixed weekends off
+      if (engineer.inTraining) {
+        for (const day of days) {
+          const dayOfWeek = getDay(day);
+          const dateStr = format(day, 'yyyy-MM-dd');
+          // Saturday = 6, Sunday = 0
+          if ((dayOfWeek === 0 || dayOfWeek === 6) &&
+              schedule[engineer.id][dateStr] === null) {
+            schedule[engineer.id][dateStr] = SHIFTS.OFF;
+          }
+        }
+        continue;
+      }
+
       // Special handling for Josh Migura (fixed Friday/Saturday off)
       if (engineer.name === 'Josh Migura') {
         for (const day of days) {
           const dayOfWeek = getDay(day);
           const dateStr = format(day, 'yyyy-MM-dd');
-
           // Friday = 5, Saturday = 6
           if ((dayOfWeek === 5 || dayOfWeek === 6) &&
               schedule[engineer.id][dateStr] === null) {
@@ -640,7 +694,7 @@ export class ShiftScheduler {
         continue;
       }
 
-      // For each week, ensure exactly 2 OFF days
+      // For each week, ensure exactly 2 CONSECUTIVE OFF days
       for (const week of weeks) {
         // Count unavailable days this week
         const unavailableDays = week.filter(d => {
@@ -648,59 +702,142 @@ export class ShiftScheduler {
           return schedule[engineer.id][dateStr] === SHIFTS.UNAVAILABLE;
         }).length;
 
-        // Count assigned shifts
-        const assignedDays = week.filter(d => {
-          const dateStr = format(d, 'yyyy-MM-dd');
-          const shift = schedule[engineer.id][dateStr];
-          return shift && shift !== SHIFTS.OFF && shift !== SHIFTS.UNAVAILABLE;
-        }).length;
-
         // Count existing OFF days
-        const existingOff = week.filter(d => {
+        const existingOffDays = week.filter(d => {
           const dateStr = format(d, 'yyyy-MM-dd');
           return schedule[engineer.id][dateStr] === SHIFTS.OFF;
-        }).length;
+        });
 
-        const neededOff = 2 - existingOff;
+        const neededOff = MIN_OFF_DAYS_PER_WEEK - existingOffDays.length;
 
         if (neededOff > 0) {
-          // Find unassigned days to mark as OFF
+          // Find pairs of consecutive unassigned days
           const unassigned = week.filter(d => {
             const dateStr = format(d, 'yyyy-MM-dd');
             return schedule[engineer.id][dateStr] === null;
           });
 
-          // Prefer weekend days for OFF
-          unassigned.sort((a, b) => {
-            const aIsWeekend = this.isWeekend(a) ? 0 : 1;
-            const bIsWeekend = this.isWeekend(b) ? 0 : 1;
-            return aIsWeekend - bIsWeekend;
-          });
+          // Find best consecutive pair for OFF days
+          let bestPair = null;
+          let bestScore = -1;
 
-          for (let i = 0; i < Math.min(neededOff, unassigned.length); i++) {
-            const dateStr = format(unassigned[i], 'yyyy-MM-dd');
-            schedule[engineer.id][dateStr] = SHIFTS.OFF;
+          for (let i = 0; i < unassigned.length - 1; i++) {
+            const day1 = unassigned[i];
+            const day2 = unassigned[i + 1];
+
+            // Check if they are consecutive
+            if (differenceInDays(day2, day1) === 1) {
+              let score = 0;
+
+              // Prefer weekend days
+              if (this.isWeekend(day1)) score += 2;
+              if (this.isWeekend(day2)) score += 2;
+
+              // Prefer days that help avoid long consecutive work streaks
+              const day1Index = days.findIndex(d => isSameDay(d, day1));
+              if (day1Index > 0) {
+                const prevConsecutive = this.getConsecutiveWorkDays(schedule, engineer.id, days[day1Index - 1], days);
+                if (prevConsecutive >= 4) score += 3;
+              }
+
+              if (score > bestScore) {
+                bestScore = score;
+                bestPair = [day1, day2];
+              }
+            }
           }
 
-          // Check if we achieved 2 OFF days
+          if (bestPair && neededOff >= 2) {
+            // Assign both consecutive OFF days
+            schedule[engineer.id][format(bestPair[0], 'yyyy-MM-dd')] = SHIFTS.OFF;
+            schedule[engineer.id][format(bestPair[1], 'yyyy-MM-dd')] = SHIFTS.OFF;
+          } else if (unassigned.length >= neededOff) {
+            // Fallback: assign OFF days preferring weekend
+            unassigned.sort((a, b) => {
+              const aIsWeekend = this.isWeekend(a) ? 0 : 1;
+              const bIsWeekend = this.isWeekend(b) ? 0 : 1;
+              return aIsWeekend - bIsWeekend;
+            });
+
+            for (let i = 0; i < Math.min(neededOff, unassigned.length); i++) {
+              const dateStr = format(unassigned[i], 'yyyy-MM-dd');
+              schedule[engineer.id][dateStr] = SHIFTS.OFF;
+            }
+          }
+
+          // Verify we achieved 2 OFF days
           const finalOffCount = week.filter(d => {
             const dateStr = format(d, 'yyyy-MM-dd');
             return schedule[engineer.id][dateStr] === SHIFTS.OFF;
           }).length;
 
-          if (finalOffCount < 2) {
+          if (finalOffCount < MIN_OFF_DAYS_PER_WEEK && unavailableDays === 0) {
             errors.push({
               type: 'off_day_violation',
               engineer: engineer.name,
               week: format(week[0], 'yyyy-MM-dd'),
-              message: `${engineer.name} has only ${finalOffCount} OFF days in week starting ${format(week[0], 'yyyy-MM-dd')}`
+              message: `${engineer.name} has only ${finalOffCount} Off days in week starting ${format(week[0], 'yyyy-MM-dd')}`
             });
           }
         }
       }
+
+      // Second pass: Ensure no more than 6 consecutive working days
+      this.enforceMaxConsecutiveWorkDays(schedule, engineer, days, errors);
     }
 
     return { success: errors.length === 0, errors, schedule };
+  }
+
+  /**
+   * Ensure no engineer works more than MAX_CONSECUTIVE_WORK_DAYS in a row
+   */
+  enforceMaxConsecutiveWorkDays(schedule, engineer, days, errors) {
+    let consecutiveCount = 0;
+    let streakStart = null;
+
+    for (let i = 0; i < days.length; i++) {
+      const dateStr = format(days[i], 'yyyy-MM-dd');
+      const shift = schedule[engineer.id][dateStr];
+
+      if (shift && shift !== SHIFTS.OFF && shift !== SHIFTS.UNAVAILABLE) {
+        if (consecutiveCount === 0) {
+          streakStart = i;
+        }
+        consecutiveCount++;
+
+        // If we hit the limit, try to insert an OFF day
+        if (consecutiveCount > MAX_CONSECUTIVE_WORK_DAYS) {
+          // Find the best day in the streak to convert to OFF
+          // Prefer days where we have adequate coverage
+          let converted = false;
+
+          // Try to find an unassigned day nearby that could become OFF
+          for (let j = streakStart; j <= i && !converted; j++) {
+            const checkDateStr = format(days[j], 'yyyy-MM-dd');
+            const currentShift = schedule[engineer.id][checkDateStr];
+
+            // Don't convert if it's the only one on that shift
+            if (currentShift && currentShift !== SHIFTS.OFF && currentShift !== SHIFTS.UNAVAILABLE) {
+              schedule[engineer.id][checkDateStr] = SHIFTS.OFF;
+              converted = true;
+              consecutiveCount = i - j; // Reset count from this point
+            }
+          }
+
+          if (!converted) {
+            errors.push({
+              type: 'consecutive_days_violation',
+              engineer: engineer.name,
+              date: dateStr,
+              message: `${engineer.name} has more than ${MAX_CONSECUTIVE_WORK_DAYS} consecutive working days ending ${dateStr}`
+            });
+          }
+        }
+      } else {
+        consecutiveCount = 0;
+      }
+    }
   }
 
   /**

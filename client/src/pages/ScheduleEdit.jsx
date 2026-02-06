@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { format } from 'date-fns';
 
-const SHIFTS = ['Early', 'Morning', 'Late', 'Night', 'OFF', 'Unavailable', null];
+const SHIFTS = ['Early', 'Morning', 'Late', 'Night', 'Off', 'Training', 'Unavailable', null];
 const SHIFT_LABELS = {
   'Early': 'E',
   'Morning': 'M',
   'Late': 'L',
   'Night': 'N',
-  'OFF': 'O',
+  'Off': 'O',
+  'Training': 'T',
   'Unavailable': 'U',
   null: '-'
 };
@@ -25,7 +26,7 @@ function ScheduleEdit() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [selectedCell, setSelectedCell] = useState(null);
-  const [unsavedChanges, setUnsavedChanges] = useState([]);
+  const [editReason, setEditReason] = useState('');
 
   useEffect(() => {
     loadSchedule();
@@ -51,6 +52,37 @@ function ScheduleEdit() {
       setLoading(false);
     }
   };
+
+  // Calculate shift counts per day
+  const shiftCounts = useMemo(() => {
+    if (!exportData) return {};
+
+    const counts = {};
+    exportData.days.forEach((day, dayIndex) => {
+      counts[day.date] = {
+        Early: 0,
+        Morning: 0,
+        Late: 0,
+        Night: 0,
+        Off: 0,
+        Training: 0,
+        Unavailable: 0,
+        total: 0
+      };
+
+      exportData.engineers.forEach(eng => {
+        const shift = eng.shifts[dayIndex]?.shift;
+        if (shift && counts[day.date][shift] !== undefined) {
+          counts[day.date][shift]++;
+          if (shift !== 'Off' && shift !== 'Unavailable') {
+            counts[day.date].total++;
+          }
+        }
+      });
+    });
+
+    return counts;
+  }, [exportData]);
 
   const handleShiftChange = async (engineerId, date, newShift) => {
     setSaving(true);
@@ -90,10 +122,6 @@ function ScheduleEdit() {
   };
 
   const handleCellClick = (engineerId, date, currentShift) => {
-    if (schedule.status === 'published') {
-      setError('Cannot edit published schedule. Create a new version first.');
-      return;
-    }
     setSelectedCell({ engineerId, date, currentShift });
   };
 
@@ -127,7 +155,7 @@ function ScheduleEdit() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <Link to={`/schedules/${id}`} style={{ color: '#666', textDecoration: 'none', fontSize: 14 }}>
-            ← Back to Schedule View
+            &larr; Back to Schedule View
           </Link>
           <h1 style={{ marginTop: 10 }}>
             Edit Schedule: {monthName} {year}
@@ -159,6 +187,13 @@ function ScheduleEdit() {
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
+      {/* Published schedule warning */}
+      {schedule.status === 'published' && (
+        <div className="alert alert-warning" style={{ marginBottom: 20 }}>
+          <strong>Note:</strong> This schedule is published. Changes will be visible to engineers and notifications will be sent.
+        </div>
+      )}
+
       {/* Validation Errors */}
       {schedule.validationErrors?.length > 0 && (
         <div className="card" style={{ marginBottom: 20, background: '#fff3e0' }}>
@@ -177,17 +212,13 @@ function ScheduleEdit() {
       <div className="card" style={{ marginBottom: 20 }}>
         <p style={{ margin: 0 }}>
           <strong>Click any cell</strong> to change the shift assignment.
-          {schedule.status === 'published' && (
-            <span style={{ color: '#c62828', marginLeft: 10 }}>
-              Note: This schedule is published and cannot be edited.
-            </span>
-          )}
+          The count row shows how many engineers are assigned to each shift per day.
         </p>
       </div>
 
       {/* Schedule Grid */}
       <div className="card">
-        <div className="schedule-grid">
+        <div className="schedule-grid" style={{ overflowX: 'auto' }}>
           {exportData && (
             <table className="schedule-table">
               <thead>
@@ -208,6 +239,29 @@ function ScheduleEdit() {
                     );
                   })}
                 </tr>
+                {/* Shift Count Row */}
+                <tr style={{ background: '#f0f0f0', fontSize: 10 }}>
+                  <td style={{ fontWeight: 'bold', background: '#e0e0e0' }}>
+                    Count
+                  </td>
+                  {exportData.days.map(day => {
+                    const counts = shiftCounts[day.date] || {};
+                    return (
+                      <td key={day.date} style={{ padding: 2, textAlign: 'center', verticalAlign: 'top' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          {counts.Early > 0 && <span style={{ color: '#b57600' }}>E:{counts.Early}</span>}
+                          {counts.Morning > 0 && <span style={{ color: '#9a8700' }}>M:{counts.Morning}</span>}
+                          {counts.Late > 0 && <span style={{ color: '#3d7ea6' }}>L:{counts.Late}</span>}
+                          {counts.Night > 0 && <span style={{ color: '#1155cc' }}>N:{counts.Night}</span>}
+                          {counts.Training > 0 && <span style={{ color: '#9c27b0' }}>T:{counts.Training}</span>}
+                        </div>
+                        <div style={{ borderTop: '1px solid #ccc', marginTop: 2, paddingTop: 2, fontWeight: 'bold' }}>
+                          {counts.total || 0}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
               </thead>
               <tbody>
                 {exportData.engineers.map(eng => (
@@ -215,6 +269,7 @@ function ScheduleEdit() {
                     <td className="engineer-name" style={{ backgroundColor: eng.tierColor }}>
                       {eng.name}
                       {eng.isFloater && <span style={{ fontSize: 10, marginLeft: 5 }}>(F)</span>}
+                      {eng.inTraining && <span style={{ fontSize: 10, marginLeft: 5, color: '#9c27b0' }}>(T)</span>}
                     </td>
                     {eng.shifts.map((shift, i) => {
                       const day = exportData.days[i];
@@ -228,7 +283,7 @@ function ScheduleEdit() {
                           className={`${weekend ? 'weekend' : ''} ${holiday ? 'holiday' : ''}`}
                           onClick={() => handleCellClick(eng.id, day.date, shift.shift)}
                           style={{
-                            cursor: schedule.status !== 'published' ? 'pointer' : 'default',
+                            cursor: 'pointer',
                             border: isSelected ? '2px solid #1976d2' : undefined,
                             background: isSelected ? '#e3f2fd' : undefined
                           }}
@@ -237,6 +292,7 @@ function ScheduleEdit() {
                             <span
                               className={`shift-cell shift-${shift.shift}`}
                               title={shift.shift}
+                              style={shift.shift === 'Training' ? { background: '#e6cff2' } : undefined}
                             >
                               {shift.shift === 'Unavailable' ? 'U' : shift.shift[0]}
                             </span>
@@ -259,7 +315,7 @@ function ScheduleEdit() {
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
             <div className="modal-header">
               <h2>Select Shift</h2>
-              <button className="btn btn-outline" onClick={() => setSelectedCell(null)}>×</button>
+              <button className="btn btn-outline" onClick={() => setSelectedCell(null)}>x</button>
             </div>
             <div className="modal-body">
               <p>
@@ -274,10 +330,16 @@ function ScheduleEdit() {
                     className={`btn ${selectedCell.currentShift === shift ? 'btn-primary' : 'btn-outline'}`}
                     onClick={() => handleShiftChange(selectedCell.engineerId, selectedCell.date, shift)}
                     disabled={saving}
-                    style={{ padding: '15px 10px' }}
+                    style={{
+                      padding: '15px 10px',
+                      background: shift === 'Training' ? '#e6cff2' : undefined
+                    }}
                   >
                     {shift ? (
-                      <span className={`shift-cell shift-${shift}`} style={{ marginRight: 5 }}>
+                      <span className={`shift-cell shift-${shift}`} style={{
+                        marginRight: 5,
+                        background: shift === 'Training' ? '#e6cff2' : undefined
+                      }}>
                         {SHIFT_LABELS[shift]}
                       </span>
                     ) : null}
@@ -301,6 +363,7 @@ function ScheduleEdit() {
           <div><span className="shift-cell shift-Late">L</span> Late (15:00-23:30)</div>
           <div><span className="shift-cell shift-Night">N</span> Night (23:00-07:30)</div>
           <div><span className="shift-cell shift-OFF">O</span> Scheduled Off</div>
+          <div><span className="shift-cell" style={{ background: '#e6cff2' }}>T</span> Training</div>
           <div><span className="shift-cell shift-Unavailable">U</span> Unavailable</div>
         </div>
       </div>

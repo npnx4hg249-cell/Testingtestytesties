@@ -78,7 +78,7 @@ function createEngineer(name, index) {
 }
 
 function createData() {
-  const adminPassword = bcrypt.hashSync('admin123', 10);
+  const adminPassword = bcrypt.hashSync('Admin123!@#', 10);
 
   // Create engineers
   const engineers = ENGINEER_NAMES.map((name, index) => createEngineer(name, index));
@@ -160,7 +160,7 @@ console.log(`Created ${data.users.length} user accounts:`);
 console.log('');
 console.log('Login Credentials:');
 console.log('------------------');
-console.log('Admin:    admin@example.com / admin123');
+console.log('Admin:    admin@example.com / Admin123!@#');
 console.log(`Manager:  ${data.users[1].email} / manager123`);
 console.log(`Engineer: ${data.users[2].email} / password123`);
 console.log('');

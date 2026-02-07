@@ -32,6 +32,8 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - JWT_SECRET=${JWT_SECRET:-cc-shifter-secret-change-in-production}
+      - DISABLE_HTTPS_REDIRECT=true
+      - ALLOWED_ORIGINS=http://localhost,http://localhost:80,http://127.0.0.1
     volumes:
       - cc-shifter-data:/app/server/data/storage
     restart: unless-stopped

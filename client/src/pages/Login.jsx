@@ -77,7 +77,7 @@ function Login() {
           <br />
           Email: admin@example.com
           <br />
-          Password: admin123
+          Password: Admin123!@#
         </div>
       </div>
     </div>

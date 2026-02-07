@@ -6,13 +6,26 @@
  * - Account lockout after 4 failed attempts
  * - Auto sign-out after 1 hour inactivity
  * - 2FA support
+ *
+ * Security Updates (v2.0):
+ * - JWT_SECRET now required (no fallback)
+ * - Cryptographically secure password generation
+ * - Email validation
  */
 
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { getById, update, getAll } from '../data/store.js';
 
-// Secret key for JWT (in production, use environment variable)
-const JWT_SECRET = process.env.JWT_SECRET || 'shifter-ices-secret-key-change-in-production';
+// JWT Secret - REQUIRED in production (no fallback for security)
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('FATAL: JWT_SECRET environment variable is required in production');
+  process.exit(1);
+}
+const FALLBACK_SECRET = 'dev-only-secret-do-not-use-in-production-' + Date.now();
+const SECRET = JWT_SECRET || FALLBACK_SECRET;
+
 const JWT_EXPIRES_IN = '8h'; // 8-hour cookie lifetime
 const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour auto sign-out
 
@@ -81,7 +94,7 @@ export function validatePasswordStrength(password) {
 }
 
 /**
- * Generate a strong random password
+ * Generate a strong random password using cryptographically secure randomness
  */
 export function generateStrongPassword(length = 16) {
   const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -93,19 +106,45 @@ export function generateStrongPassword(length = 16) {
 
   let password = '';
 
-  // Ensure at least one of each type
-  password += uppercase[Math.floor(Math.random() * uppercase.length)];
-  password += lowercase[Math.floor(Math.random() * lowercase.length)];
-  password += numbers[Math.floor(Math.random() * numbers.length)];
-  password += special[Math.floor(Math.random() * special.length)];
+  // Ensure at least one of each type using crypto.randomInt (secure)
+  password += uppercase[crypto.randomInt(0, uppercase.length)];
+  password += lowercase[crypto.randomInt(0, lowercase.length)];
+  password += numbers[crypto.randomInt(0, numbers.length)];
+  password += special[crypto.randomInt(0, special.length)];
 
-  // Fill the rest randomly
+  // Fill the rest randomly using crypto.randomInt
   for (let i = password.length; i < length; i++) {
-    password += allChars[Math.floor(Math.random() * allChars.length)];
+    password += allChars[crypto.randomInt(0, allChars.length)];
   }
 
-  // Shuffle the password
-  return password.split('').sort(() => Math.random() - 0.5).join('');
+  // Shuffle the password using Fisher-Yates with crypto.randomInt
+  const chars = password.split('');
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(0, i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+
+  return chars.join('');
+}
+
+/**
+ * Validate email format
+ */
+export function validateEmail(email) {
+  if (!email || typeof email !== 'string') {
+    return { valid: false, error: 'Email is required' };
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return { valid: false, error: 'Invalid email format' };
+  }
+
+  if (email.length > 254) {
+    return { valid: false, error: 'Email address too long' };
+  }
+
+  return { valid: true };
 }
 
 /**
@@ -201,7 +240,7 @@ export function generateToken(user) {
     issuedAt: Date.now()
   };
 
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  return jwt.sign(payload, SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
 /**
@@ -209,7 +248,7 @@ export function generateToken(user) {
  */
 export function verifyToken(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    return jwt.verify(token, SECRET);
   } catch (error) {
     return null;
   }
@@ -331,6 +370,7 @@ export const trackFailedAttempt = recordFailedAttempt;
 
 export default {
   validatePasswordStrength,
+  validateEmail,
   generateStrongPassword,
   isAccountLocked,
   recordFailedAttempt,

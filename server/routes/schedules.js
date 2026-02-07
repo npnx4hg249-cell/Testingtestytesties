@@ -16,7 +16,8 @@ import {
   getApprovedRequestsForMonth
 } from '../data/store.js';
 import { authenticate, requireManager } from '../middleware/auth.js';
-import { ShiftScheduler, SHIFTS, COLORS } from '../services/constraintSolver.js';
+// Use new modular scheduler (v2.0)
+import { Scheduler, SHIFTS, COLORS, VERSION as SCHEDULER_VERSION } from '../services/scheduler/index.js';
 import { getHolidaysForMonth, getHolidaysForEngineer } from '../services/germanHolidays.js';
 import { format, parse, startOfMonth, endOfMonth, eachDayOfInterval, subMonths } from 'date-fns';
 import { notifySchedulePublished, notifyScheduleChange } from '../services/emailService.js';
@@ -161,7 +162,7 @@ router.post('/generate', authenticate, requireManager, (req, res) => {
   const monthDate = new Date(year, month - 1, 1);
 
   // Create scheduler
-  const scheduler = new ShiftScheduler({
+  const scheduler = new Scheduler({
     engineers,
     month: monthDate,
     holidays,
@@ -253,7 +254,7 @@ router.post('/generate-with-option', authenticate, requireManager, (req, res) =>
   }
 
   // Create scheduler with modified options
-  const scheduler = new ShiftScheduler({
+  const scheduler = new Scheduler({
     engineers,
     month: monthDate,
     holidays,
@@ -319,15 +320,15 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
   const holidays = getHolidaysForMonth(year, month, engineerStates);
   const monthDate = new Date(year, month - 1, 1);
 
-  const scheduler = new ShiftScheduler({
+  const scheduler = new Scheduler({
     engineers,
     month: monthDate,
     holidays
   });
 
-  const days = scheduler.getMonthDays();
-  const weeks = scheduler.getWeeks();
-  const validation = scheduler.validateSchedule(data, days, weeks);
+  const days = scheduler.getDays();
+  const weeks = scheduler.getWeeksInMonth();
+  const validation = scheduler.validateSchedule(data);
 
   // Track edit history if schedule is published
   const editHistory = schedule.editHistory || [];
@@ -342,7 +343,7 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
 
   const updated = update('schedules', req.params.id, {
     data,
-    stats: scheduler.calculateStats(data, days, weeks),
+    stats: scheduler.calculateStats(data),
     validationErrors: validation.valid ? [] : validation.errors,
     editHistory,
     lastEditedAt: new Date().toISOString(),
@@ -674,18 +675,18 @@ router.put('/:id/shift', authenticate, requireManager, (req, res) => {
   const month = parseInt(schedule.month.split('-')[1]);
   const monthDate = new Date(year, month - 1, 1);
 
-  const scheduler = new ShiftScheduler({
+  const scheduler = new Scheduler({
     engineers,
     month: monthDate
   });
 
-  const days = scheduler.getMonthDays();
-  const weeks = scheduler.getWeeks();
-  const validation = scheduler.validateSchedule(newData, days, weeks);
+  const days = scheduler.getDays();
+  const weeks = scheduler.getWeeksInMonth();
+  const validation = scheduler.validateSchedule(newData);
 
   const updated = update('schedules', req.params.id, {
     data: newData,
-    stats: scheduler.calculateStats(newData, days, weeks),
+    stats: scheduler.calculateStats(newData),
     validationErrors: validation.valid ? [] : validation.errors,
     editHistory
   });

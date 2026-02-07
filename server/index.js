@@ -3,6 +3,12 @@
  *
  * Intelligent Constraint-based Engineering Scheduler
  * A shift planning application for engineering teams.
+ *
+ * Security Updates (v2.0):
+ * - CORS origin restrictions
+ * - Security headers
+ * - Rate limiting
+ * - HTTPS enforcement in production
  */
 
 import express from 'express';
@@ -29,10 +35,109 @@ initStore();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors());
+// Rate limiting (in-memory, simple implementation)
+const rateLimitStore = new Map();
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 100; // 100 requests per minute
+const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const LOGIN_RATE_LIMIT_MAX = 10; // 10 login attempts per 15 minutes
+
+function rateLimit(windowMs, maxRequests, keyGenerator = (req) => req.ip) {
+  return (req, res, next) => {
+    const key = keyGenerator(req);
+    const now = Date.now();
+    const windowKey = `${key}_${Math.floor(now / windowMs)}`;
+
+    const current = rateLimitStore.get(windowKey) || 0;
+    if (current >= maxRequests) {
+      return res.status(429).json({
+        error: 'Too many requests, please try again later'
+      });
+    }
+
+    rateLimitStore.set(windowKey, current + 1);
+
+    // Cleanup old entries
+    for (const [k, v] of rateLimitStore.entries()) {
+      const keyTime = parseInt(k.split('_').pop()) * windowMs;
+      if (now - keyTime > windowMs * 2) {
+        rateLimitStore.delete(k);
+      }
+    }
+
+    next();
+  };
+}
+
+// Security headers middleware
+const securityHeaders = (req, res, next) => {
+  // Prevent clickjacking
+  res.setHeader('X-Frame-Options', 'DENY');
+
+  // Prevent MIME type sniffing
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  // XSS protection
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+
+  // Content Security Policy
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'");
+
+  // Referrer Policy
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+  // Permissions Policy
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+
+  // HSTS (only in production with HTTPS)
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+
+  next();
+};
+
+// HTTPS enforcement in production
+const enforceHttps = (req, res, next) => {
+  if (process.env.NODE_ENV === 'production' &&
+      req.headers['x-forwarded-proto'] !== 'https' &&
+      !req.secure) {
+    return res.redirect(301, `https://${req.headers.host}${req.url}`);
+  }
+  next();
+};
+
+// CORS configuration
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+// Apply middleware
+app.use(enforceHttps);
+app.use(securityHeaders);
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Apply rate limiting
+app.use('/api/', rateLimit(RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS));
+app.use('/api/auth/login', rateLimit(LOGIN_RATE_LIMIT_WINDOW_MS, LOGIN_RATE_LIMIT_MAX));
 
 // Request logging
 app.use((req, res, next) => {

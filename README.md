@@ -93,22 +93,46 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 
 ---
 
-## What's New in v2.0
+## What's New in v3.0
 
-### Major Features
-1. **Renamed to ICES-Shifter**  Intelligent Constraint-based Engineering Scheduler ( That is not what it stands for but good try)
-2. **Version Management** - Semantic versioning with changelog
-3. **Auto-Update from GitHub** - Check and apply updates from within the admin portal
-4. **Excel Import/Export** - Support for .xlsx files in addition to CSV
-5. **Unavailability Calendar** - Visual calendar to mark sick/vacation days (SAP-ready)
-6. **Schedule Preview** - View partial schedules even when generation fails
-7. **24-Month Archiving** - Historical schedule storage with role-based access
-8. **Manual Shift Editing** - Edit individual shifts with validation
-9. **Admin-as-Engineer** - Link admin/manager accounts to engineer profiles
-10. **Email Notifications** - Notify users when schedules change
-11. **Engineer Schedule View** - Engineers can view their schedules directly
-12. **Shift Consistency Rule** - Maintains shift type consistency week-to-week
-13. **Weekend Shift Preferences** - Separate preferences for weekend shifts
+### Major Features - v3.0
+1. **Modular Schedule Generation Engine** - Complete rewrite with pluggable architecture
+2. **German Labor Law (ArbZG) Compliance** - Full Arbeitszeitgesetz compliance built-in
+3. **Constraint Satisfaction Problem (CSP) Solver** - AC-3 arc consistency algorithm
+4. **Enhanced Security** - JWT_SECRET required, rate limiting, security headers
+5. **Unified User Model** - Single user system with role flags (Admin, Manager, Floater, Training)
+6. **User Dashboard** - Self-service profile with 2FA, password change, preferences
+7. **Strategy-Based Scheduling** - Night, Day, and Floater assignment strategies
+
+### Scheduler Architecture (v2.0.0)
+The schedule generation engine has been completely modularized:
+- **Core**: CSP solver with AC-3 algorithm and MRV heuristic
+- **Rules**: German labor law (ArbZG) compliance module
+- **Strategies**: Night shift, Day shift, Floater assignment strategies
+- **Constraints**: Modular constraint definitions (coverage, transitions, preferences)
+- **Config**: Centralized configuration for shifts, coverage, and rules
+
+### Security Enhancements
+- **JWT_SECRET Required** - No fallback in production (must set environment variable)
+- **Rate Limiting** - 100 requests/minute API, 10 login attempts per 15 minutes
+- **Security Headers** - CSP, X-Frame-Options, HSTS, X-Content-Type-Options
+- **HTTPS Enforcement** - Automatic redirect in production
+- **Cryptographic Password Generation** - Uses `crypto.randomInt` for secure randomness
+- **CORS Restrictions** - Configurable allowed origins
+
+### Previous Features (v2.0)
+1. Version Management with changelog
+2. Auto-Update from GitHub
+3. Excel Import/Export
+4. Unavailability Calendar
+5. Schedule Preview (even on failure)
+6. 24-Month Archiving
+7. Manual Shift Editing with validation
+8. Admin-as-Engineer linking
+9. Email Notifications
+10. Engineer Schedule View
+11. Shift Consistency Rules
+12. Weekend Shift Preferences
 
 ---
 
@@ -218,7 +242,8 @@ The application will be available at `http://localhost`
 |----------|---------|-------------|
 | `PORT` | 3001 | API server port |
 | `NODE_ENV` | production | Environment mode |
-| `JWT_SECRET` | (default) | Secret for JWT tokens (**change in production!**) |
+| `JWT_SECRET` | **REQUIRED** | Secret for JWT tokens (**required in production - no fallback!**) |
+| `ALLOWED_ORIGINS` | localhost:3000,3001,5173 | Comma-separated list of allowed CORS origins |
 | `SESSION_TIMEOUT` | 3600000 | Session timeout in ms (default: 1 hour) |
 | `COOKIE_LIFETIME` | 28800000 | Cookie lifetime in ms (default: 8 hours) |
 | `SMTP_HOST` | - | SMTP server for email notifications |
@@ -227,6 +252,11 @@ The application will be available at `http://localhost`
 | `SMTP_PASS` | - | SMTP password |
 | `SMTP_FROM` | - | From email address |
 | `SMTP_SECURE` | false | Use TLS |
+
+**Security Note:** In production, the server will **fail to start** if `JWT_SECRET` is not set. Generate a strong secret:
+```bash
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+```
 
 ### Data Persistence
 Data is stored in `/app/server/data/storage` inside the API container.
@@ -304,7 +334,11 @@ Passwords must meet the following requirements:
 - Minimum 10 characters
 - At least one special character (!@#$%^&*_+-=, etc.)
 - At least one number
+- At least one uppercase letter
+- At least one lowercase letter
 - No common dictionary words (password, admin, user, etc.)
+- No sequential characters (123, abc)
+- No repeated characters (aaa)
 
 ### Two-Factor Authentication (2FA)
 - TOTP-based authentication using apps like Google Authenticator
@@ -314,6 +348,7 @@ Passwords must meet the following requirements:
 
 ### Account Lockout
 - Account locks after 4 failed login attempts
+- 30-minute lockout duration
 - Locked accounts display notification to admins on Dashboard
 - Admin can unlock accounts from the Dashboard
 - Prevents brute-force password attacks
@@ -323,16 +358,53 @@ Passwords must meet the following requirements:
 - Cookie lifetime of 8 hours
 - JWT-based authentication
 - Activity tracking resets timeout on user actions
+- **JWT_SECRET required** - no fallback in production
+
+### API Security
+- **Rate Limiting**: 100 requests per minute per IP
+- **Login Rate Limiting**: 10 attempts per 15 minutes
+- **CORS**: Configurable allowed origins (restricted in production)
+- **HTTPS Enforcement**: Automatic redirect in production
+
+### Security Headers
+All responses include security headers:
+- `X-Frame-Options: DENY` - Prevents clickjacking
+- `X-Content-Type-Options: nosniff` - Prevents MIME sniffing
+- `X-XSS-Protection: 1; mode=block` - XSS filter
+- `Content-Security-Policy` - Restricts resource loading
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy` - Restricts browser features
+- `Strict-Transport-Security` (production only) - Forces HTTPS
 
 ### Password Management
 - Users can change their password in Profile
 - Admins can reset engineer passwords
-- Option to generate strong password automatically
+- **Cryptographically secure** password generation using `crypto.randomInt`
 - Option to send new password via email
+
+### Security Documentation
+A comprehensive security audit report is available at `/docs/SECURITY_REPORT.md` documenting:
+- All identified vulnerabilities and their severity
+- Remediation steps taken
+- Remaining recommendations
 
 ---
 
 ## Scheduling Rules
+
+The scheduler implements German labor law (Arbeitszeitgesetz/ArbZG) compliance alongside operational constraints.
+
+### German Labor Law (ArbZG) Compliance
+
+The scheduler enforces the following legal requirements:
+
+| Requirement | Law Reference | Implementation |
+|-------------|---------------|----------------|
+| Maximum daily hours | §3 ArbZG | 8 hours (10 with averaging) |
+| Minimum rest between shifts | §5 ArbZG | 11 hours minimum |
+| Maximum consecutive work days | §11 ArbZG | 6 days maximum |
+| Weekly rest period | §11 ArbZG | 24 hours uninterrupted |
+| Night work provisions | §6 ArbZG | Special handling for 23:00-06:00 |
 
 ### Hard Constraints (Zero Flexibility)
 
@@ -344,17 +416,24 @@ Passwords must meet the following requirements:
    - Every core engineer: exactly 2 consecutive OFF days per Mon-Sun week
    - Unavailable days do NOT count as OFF
    - OFF days must be explicitly scheduled
-   - Maximum 6 consecutive working days
+   - Maximum 6 consecutive working days (§11 ArbZG)
 
-3. **Weekly Workload** (Core Engineers)
+3. **Rest Period (§5 ArbZG)**
+   - Minimum 11 hours rest between shifts
+   - Automatically prevents illegal shift transitions
+   - Night → Early: Forbidden (only ~23.5 hours rest)
+   - Night → Morning: Forbidden (only 2.5 hours rest)
+   - Late → Early: Forbidden (only 7.5 hours rest)
+
+4. **Weekly Workload** (Core Engineers)
    - No vacation in week → minimum 5 shifts
    - With vacation → 5-shift minimum suspended
    - Maximum 6 shifts (only for transitions)
 
-4. **One Shift Per Day**
+5. **One Shift Per Day**
    - No engineer may work more than one shift per day
 
-5. **Coverage Requirements**
+6. **Coverage Requirements**
 
    | Day Type | Early | Morning | Late | Night |
    |----------|-------|---------|------|-------|
@@ -363,23 +442,24 @@ Passwords must meet the following requirements:
 
    *Core engineers must meet minimums before floaters are added*
 
-6. **Floater Rules**
+7. **Floater Rules**
    - Maximum 2 floaters total
    - Maximum 2.5 shifts per week each
    - May NOT replace core minimum coverage
    - May NOT be scheduled on same shift as other floater
    - Exempt from night continuity rules
 
-7. **Night Shift Continuity**
+8. **Night Shift Continuity**
    - Night assignments must be in stable cohorts
    - Minimum 2 consecutive full weeks on nights
    - Prefer entire month when possible
 
-8. **Adjacency Rules** (Forbidden Transitions)
-   - Night → Early (forbidden)
-   - Night → Morning (forbidden)
-   - Early → Night (forbidden)
-   - Morning → Night (forbidden)
+9. **Adjacency Rules** (Forbidden Transitions per §5 ArbZG)
+   - Night → Early (forbidden - insufficient rest)
+   - Night → Morning (forbidden - insufficient rest)
+   - Late → Early (forbidden - insufficient rest)
+   - Early → Night (forbidden - insufficient rest)
+   - Morning → Night (forbidden - insufficient rest)
 
 9. **Training Engineers**
    - Engineers marked "In Training" receive:
@@ -596,7 +676,24 @@ shifter-for-ices/
 │   │   ├── requests.js          # Request handling
 │   │   └── system.js            # System/admin endpoints
 │   ├── services/
-│   │   ├── constraintSolver.js  # Core scheduling algorithm
+│   │   ├── scheduler/           # Modular scheduling engine (v2.0)
+│   │   │   ├── index.js         # Module entry point
+│   │   │   ├── core/
+│   │   │   │   ├── Scheduler.js         # Main orchestrator
+│   │   │   │   └── ConstraintEngine.js  # CSP solver (AC-3)
+│   │   │   ├── config/
+│   │   │   │   └── defaults.js          # Shift/coverage configuration
+│   │   │   ├── rules/
+│   │   │   │   └── GermanLaborLaws.js   # ArbZG compliance
+│   │   │   ├── constraints/
+│   │   │   │   └── index.js             # Modular constraints
+│   │   │   ├── strategies/
+│   │   │   │   ├── NightShiftStrategy.js
+│   │   │   │   ├── DayShiftStrategy.js
+│   │   │   │   └── FloaterStrategy.js
+│   │   │   └── utils/
+│   │   │       └── DateUtils.js         # Date utilities
+│   │   ├── constraintSolver.js  # Legacy (deprecated)
 │   │   ├── germanHolidays.js    # Holiday calculations
 │   │   └── emailService.js      # Email notifications
 │   ├── middleware/

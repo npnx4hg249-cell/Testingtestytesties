@@ -621,3 +621,330 @@ body {
     min-width: 30px;
   }
 }
+
+/* ==========================================
+   DARK MODE STYLES
+   ========================================== */
+
+.dark-mode {
+  --primary: #4d8fcc;
+  --primary-hover: #5a9fd6;
+  --success: #66bb6a;
+  --warning: #ffa726;
+  --danger: #ef5350;
+  --bg-light: #1a1a2e;
+  --bg-dark: #16213e;
+  --bg-card: #1f2940;
+  --border: #3a4a6b;
+  --text: #e8e8e8;
+  --text-muted: #a0a0a0;
+}
+
+.dark-mode body {
+  background-color: var(--bg-dark);
+  color: var(--text);
+}
+
+/* Dark mode header */
+.dark-mode .header {
+  background: var(--bg-card);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+/* Dark mode cards */
+.dark-mode .card {
+  background: var(--bg-card);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.dark-mode .card-header {
+  border-bottom-color: var(--border);
+}
+
+/* Dark mode tables */
+.dark-mode .data-table th {
+  background: var(--bg-light);
+}
+
+.dark-mode .data-table td {
+  border-bottom-color: var(--border);
+}
+
+.dark-mode .data-table tr:hover {
+  background: var(--bg-light);
+}
+
+/* Dark mode schedule table */
+.dark-mode .schedule-table th {
+  background: var(--bg-light);
+}
+
+.dark-mode .schedule-table th,
+.dark-mode .schedule-table td {
+  border-color: var(--border);
+}
+
+.dark-mode .schedule-table .engineer-name {
+  background: var(--bg-card);
+}
+
+.dark-mode .schedule-table th.engineer-name {
+  background: var(--bg-light);
+}
+
+.dark-mode .schedule-table .weekend {
+  background: rgba(255,255,255,0.03);
+}
+
+.dark-mode .schedule-table .holiday {
+  background: rgba(255,152,0,0.15);
+}
+
+/* Dark mode forms */
+.dark-mode .form-group input,
+.dark-mode .form-group select,
+.dark-mode .form-group textarea {
+  background: var(--bg-light);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.dark-mode .form-group input:focus,
+.dark-mode .form-group select:focus,
+.dark-mode .form-group textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(77, 143, 204, 0.2);
+}
+
+.dark-mode .form-group input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Dark mode buttons */
+.dark-mode .btn-outline {
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.dark-mode .btn-outline:hover {
+  background: var(--bg-light);
+}
+
+/* Dark mode modals */
+.dark-mode .modal-overlay {
+  background: rgba(0,0,0,0.7);
+}
+
+.dark-mode .modal {
+  background: var(--bg-card);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+}
+
+.dark-mode .modal-header {
+  border-bottom-color: var(--border);
+}
+
+.dark-mode .modal-footer {
+  border-top-color: var(--border);
+}
+
+/* Dark mode alerts */
+.dark-mode .alert-error {
+  background: rgba(239, 83, 80, 0.15);
+  border-color: rgba(239, 83, 80, 0.3);
+  color: #ff6b6b;
+}
+
+.dark-mode .alert-success {
+  background: rgba(102, 187, 106, 0.15);
+  border-color: rgba(102, 187, 106, 0.3);
+  color: #7dce82;
+}
+
+.dark-mode .alert-warning {
+  background: rgba(255, 167, 38, 0.15);
+  border-color: rgba(255, 167, 38, 0.3);
+  color: #ffb74d;
+}
+
+.dark-mode .alert-info {
+  background: rgba(77, 143, 204, 0.15);
+  border-color: rgba(77, 143, 204, 0.3);
+  color: #64b5f6;
+}
+
+/* Dark mode stat boxes */
+.dark-mode .stat-box {
+  background: var(--bg-card);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.dark-mode .stat-box h3 {
+  color: var(--text-muted);
+}
+
+/* Dark mode request cards */
+.dark-mode .request-card {
+  background: var(--bg-card);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.dark-mode .badge-pending {
+  background: rgba(255, 167, 38, 0.2);
+  color: #ffb74d;
+}
+
+.dark-mode .badge-approved {
+  background: rgba(102, 187, 106, 0.2);
+  color: #7dce82;
+}
+
+.dark-mode .badge-rejected {
+  background: rgba(239, 83, 80, 0.2);
+  color: #ff6b6b;
+}
+
+/* Dark mode option cards */
+.dark-mode .option-card {
+  background: var(--bg-card);
+  border-color: var(--border);
+}
+
+.dark-mode .option-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* Dark mode preferences */
+.dark-mode .preference-item {
+  border-color: var(--border);
+}
+
+.dark-mode .preference-item:hover {
+  background: var(--bg-light);
+}
+
+/* Dark mode date tags */
+.dark-mode .date-tag {
+  background: var(--bg-light);
+}
+
+/* Dark mode login page */
+.dark-mode .login-container {
+  background: linear-gradient(135deg, var(--bg-dark) 0%, #0a0a15 100%);
+}
+
+.dark-mode .login-card {
+  background: var(--bg-card);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+}
+
+.dark-mode .login-card h1 {
+  color: var(--primary);
+}
+
+/* Dark mode loading spinner */
+.dark-mode .spinner {
+  border-color: var(--border);
+  border-top-color: var(--primary);
+}
+
+/* Dark mode scrollbars */
+.dark-mode ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.dark-mode ::-webkit-scrollbar-track {
+  background: var(--bg-dark);
+}
+
+.dark-mode ::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+
+.dark-mode ::-webkit-scrollbar-thumb:hover {
+  background: #4a5a7b;
+}
+
+/* Bulk upload styles */
+.bulk-upload-section {
+  margin-top: 20px;
+  padding: 20px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.bulk-upload-section:hover {
+  border-color: var(--primary);
+  background: rgba(17, 85, 204, 0.02);
+}
+
+.dark-mode .bulk-upload-section:hover {
+  background: rgba(77, 143, 204, 0.05);
+}
+
+.bulk-upload-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 15px;
+}
+
+.file-input-wrapper {
+  position: relative;
+  overflow: hidden;
+  display: inline-block;
+}
+
+.file-input-wrapper input[type="file"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.upload-results {
+  margin-top: 20px;
+  text-align: left;
+}
+
+.upload-results h4 {
+  margin-bottom: 10px;
+}
+
+.upload-results ul {
+  list-style: none;
+  padding: 0;
+}
+
+.upload-results li {
+  padding: 8px 12px;
+  margin-bottom: 5px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.upload-results li.success {
+  background: rgba(76, 175, 80, 0.1);
+  border-left: 3px solid var(--success);
+}
+
+.upload-results li.error {
+  background: rgba(244, 67, 54, 0.1);
+  border-left: 3px solid var(--danger);
+}
+
+.dark-mode .upload-results li.success {
+  background: rgba(102, 187, 106, 0.15);
+}
+
+.dark-mode .upload-results li.error {
+  background: rgba(239, 83, 80, 0.15);
+}

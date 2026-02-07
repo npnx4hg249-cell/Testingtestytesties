@@ -38,15 +38,17 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 - Adjacency rules to prevent invalid shift transitions
 - **Shift count display** per day on schedule edit page
 
-### Engineer Management
-- Engineer profiles with Tier classification (T1, T2, T3)
-- Shift preferences per engineer (weekday and weekend)
+### User Management
+- User profiles with Tier classification (T1, T2, T3)
+- Role flags: Admin, Manager, Floater, In Training
+- Shift preferences per user (weekday and weekend)
 - **Availability view** for unavailability (sick leave, vacation, personal days)
 - German state assignment for holiday calculation
-- **Bulk import via CSV and Excel**
-- **Export engineers to CSV/Excel**
-- **Duplicate/copy engineer** for easy creation
-- **In Training flag** - Engineers marked as "In Training" receive:
+- **Bulk import via CSV and Excel** - Upload multiple users at once
+- **Export users to CSV/Excel** - Download all users with attributes
+- **Download templates** - CSV and Excel templates for bulk import
+- **Duplicate/copy user** for easy creation
+- **In Training flag** - Users marked as "In Training" receive:
   - Training shift Monday-Friday
   - Automatic OFF on weekends
   - Purple highlighting (#e6cff2) in schedules
@@ -595,36 +597,47 @@ Base URL: `http://localhost:3001/api`
 | POST | `/auth/admin/create` | Create admin user | Admin |
 | POST | `/auth/admin/reset-password` | Reset user password | Admin |
 
-### Engineers
+### Users
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| GET | `/engineers` | List all engineers | Yes |
-| GET | `/engineers/:id` | Get engineer by ID | Yes |
-| POST | `/engineers` | Create engineer | Manager |
-| PUT | `/engineers/:id` | Update engineer | Manager |
-| DELETE | `/engineers/:id` | Deactivate engineer | Manager |
-| POST | `/engineers/:id/duplicate` | Duplicate engineer | Manager |
-| PUT | `/engineers/:id/preferences` | Update shift preferences | Yes* |
-| PUT | `/engineers/:id/unavailable` | Update unavailable days | Yes* |
-| GET | `/engineers/:id/availability` | Get availability page | Yes* |
-| GET | `/engineers/:id/unavailable-dates` | Get unavailable dates (detailed) | Yes* |
-| POST | `/engineers/:id/unavailable-dates` | Add unavailable dates | Yes* |
-| DELETE | `/engineers/:id/unavailable-dates` | Remove unavailable dates | Yes* |
-| GET | `/engineers/:id/holidays` | Get holidays for engineer | Yes |
-| POST | `/engineers/:id/reset-password` | Reset engineer password | Admin |
-| POST | `/engineers/:id/create-account` | Create user account for engineer | Admin |
-| GET | `/engineers/states` | List German states | No |
-| GET | `/engineers/check-email/:email` | Check email uniqueness | Manager |
-| POST | `/engineers/bulk-upload` | Bulk upload from CSV | Manager |
-| POST | `/engineers/bulk-upload-excel` | Bulk upload from Excel | Manager |
-| GET | `/engineers/export/csv` | Export engineers as CSV | Manager |
-| GET | `/engineers/export/excel` | Export engineers as Excel | Manager |
-| GET | `/engineers/csv-template` | Download CSV template | No |
-| GET | `/engineers/excel-template` | Download Excel template | No |
-| GET | `/engineers/shift-options` | Get shift preference options | No |
+| GET | `/users` | List all users | Yes |
+| GET | `/users/:id` | Get user by ID | Yes |
+| POST | `/users` | Create user | Manager |
+| PUT | `/users/:id` | Update user | Manager |
+| DELETE | `/users/:id` | Deactivate user | Manager |
+| POST | `/users/:id/duplicate` | Duplicate user | Manager |
+| PUT | `/users/:id/preferences` | Update shift preferences | Yes* |
+| PUT | `/users/:id/unavailable` | Update unavailable days | Yes* |
+| GET | `/users/:id/availability` | Get availability page | Yes* |
+| GET | `/users/:id/unavailable-dates` | Get unavailable dates (detailed) | Yes* |
+| POST | `/users/:id/unavailable-dates` | Add unavailable dates | Yes* |
+| DELETE | `/users/:id/unavailable-dates` | Remove unavailable dates | Yes* |
+| GET | `/users/:id/holidays` | Get holidays for user | Yes |
+| POST | `/users/:id/reset-password` | Reset user password | Admin |
+| GET | `/users/states` | List German states | No |
+| GET | `/users/check-email/:email` | Check email uniqueness | Manager |
+| POST | `/users/bulk-upload` | Bulk upload from CSV | Manager |
+| POST | `/users/bulk-upload-excel` | Bulk upload from Excel | Manager |
+| GET | `/users/export/csv` | Export users as CSV | Manager |
+| GET | `/users/export/excel` | Export users as Excel | Manager |
+| GET | `/users/csv-template` | Download CSV template | No |
+| GET | `/users/excel-template` | Download Excel template | No |
+| GET | `/users/shift-options` | Get shift preference options | No |
 
-*Engineers can access their own; managers can access any
+*Users can access their own; managers can access any
+
+### Engineers (Legacy - Maps to Users)
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| GET | `/engineers` | Alias for `/users` | Yes |
+| GET | `/engineers/:id` | Alias for `/users/:id` | Yes |
+| POST | `/engineers` | Alias for POST `/users` | Manager |
+| PUT | `/engineers/:id` | Alias for PUT `/users/:id` | Manager |
+| DELETE | `/engineers/:id` | Alias for DELETE `/users/:id` | Manager |
+
+*Note: The `/engineers` endpoints are maintained for backward compatibility and map directly to `/users`.*
 
 ### Schedules
 
@@ -799,9 +812,11 @@ Admins/Managers can link their account to an engineer profile, allowing them to:
 ### Dark Mode
 
 Users can enable dark mode:
-- Toggle in Profile page
-- Preference stored per user
-- Persists across sessions
+- Toggle via moon/sun icon in the header
+- Toggle in Profile page under Preferences
+- Full dark theme with optimized colors for all UI elements
+- Preference stored per user and synced to server
+- Persists across sessions and devices
 
 ---
 

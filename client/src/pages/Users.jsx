@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 
@@ -18,6 +18,13 @@ function Users() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [generatedPassword, setGeneratedPassword] = useState('');
   const [editingUser, setEditingUser] = useState(null);
+
+  // Bulk upload state
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResults, setUploadResults] = useState(null);
+  const fileInputRef = useRef(null);
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -208,6 +215,101 @@ function Users() {
     return types.length > 0 ? types.join(', ') : 'User';
   };
 
+  // Bulk upload handlers
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadResults(null);
+    setError('');
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const base64 = e.target.result.split(',')[1];
+          const response = await api.bulkUploadUsersExcel(base64);
+          setUploadResults(response);
+          if (response.success && response.success.length > 0) {
+            setSuccess(`Successfully imported ${response.success.length} users`);
+            await loadData();
+          }
+          setTimeout(() => setSuccess(''), 5000);
+        } catch (err) {
+          setError(err.message || 'Failed to upload file');
+        } finally {
+          setUploading(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setError(err.message);
+      setUploading(false);
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleExportCSV = async () => {
+    try {
+      const blob = await api.exportUsersCSV();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `users-export-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      setSuccess('CSV exported successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.message || 'Failed to export CSV');
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      const blob = await api.exportUsersExcel();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `users-export-${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      setSuccess('Excel exported successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.message || 'Failed to export Excel');
+    }
+  };
+
+  const handleDownloadTemplate = async (format) => {
+    try {
+      const endpoint = format === 'csv' ? '/users/csv-template' : '/users/excel-template';
+      const response = await fetch(`/api${endpoint}`, {
+        headers: { 'Authorization': `Bearer ${api.getToken()}` }
+      });
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = format === 'csv' ? 'users-template.csv' : 'users-template.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || 'Failed to download template');
+    }
+  };
+
   if (loading) {
     return <div className="loading-container"><div className="spinner"></div></div>;
   }
@@ -217,9 +319,12 @@ function Users() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <h1>Users</h1>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="btn btn-outline" onClick={() => setShowBulkUpload(!showBulkUpload)}>
+            {showBulkUpload ? 'Hide Import/Export' : 'Import/Export'}
+          </button>
           <button className="btn btn-primary" onClick={() => openModal()}>
             + Add User
           </button>
@@ -228,6 +333,94 @@ function Users() {
 
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
+
+      {/* Bulk Import/Export Section */}
+      {showBulkUpload && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-header">
+            <h2>Import / Export Users</h2>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            {/* Import Section */}
+            <div className="bulk-upload-section">
+              <h3 style={{ marginBottom: 15 }}>Import Users</h3>
+              <p style={{ color: 'var(--text-muted)', marginBottom: 15, fontSize: 14 }}>
+                Upload a CSV or Excel file to bulk import users.
+              </p>
+              <div className="bulk-upload-actions">
+                <div className="file-input-wrapper">
+                  <button className="btn btn-primary" disabled={uploading}>
+                    {uploading ? 'Uploading...' : 'Upload File'}
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={handleFileUpload}
+                    disabled={uploading}
+                  />
+                </div>
+              </div>
+              <div style={{ marginTop: 15 }}>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>Download template:</p>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                  <button className="btn btn-outline" style={{ padding: '5px 15px', fontSize: 13 }} onClick={() => handleDownloadTemplate('csv')}>
+                    CSV Template
+                  </button>
+                  <button className="btn btn-outline" style={{ padding: '5px 15px', fontSize: 13 }} onClick={() => handleDownloadTemplate('excel')}>
+                    Excel Template
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Export Section */}
+            <div className="bulk-upload-section">
+              <h3 style={{ marginBottom: 15 }}>Export Users</h3>
+              <p style={{ color: 'var(--text-muted)', marginBottom: 15, fontSize: 14 }}>
+                Download all users with their attributes.
+              </p>
+              <div className="bulk-upload-actions">
+                <button className="btn btn-success" onClick={handleExportCSV}>
+                  Export CSV
+                </button>
+                <button className="btn btn-success" onClick={handleExportExcel}>
+                  Export Excel
+                </button>
+              </div>
+              <p style={{ marginTop: 15, fontSize: 13, color: 'var(--text-muted)' }}>
+                Includes: name, email, tier, roles, state, preferences, status
+              </p>
+            </div>
+          </div>
+
+          {/* Upload Results */}
+          {uploadResults && (
+            <div className="upload-results" style={{ marginTop: 20 }}>
+              {uploadResults.success && uploadResults.success.length > 0 && (
+                <div style={{ marginBottom: 15 }}>
+                  <h4 style={{ color: 'var(--success)' }}>Successfully Imported ({uploadResults.success.length})</h4>
+                  <ul>
+                    {uploadResults.success.map((item, i) => (
+                      <li key={i} className="success">{item.name} ({item.email})</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {uploadResults.errors && uploadResults.errors.length > 0 && (
+                <div>
+                  <h4 style={{ color: 'var(--danger)' }}>Errors ({uploadResults.errors.length})</h4>
+                  <ul>
+                    {uploadResults.errors.map((item, i) => (
+                      <li key={i} className="error">Row {item.row}: {item.error}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card">
         <div className="card-header">

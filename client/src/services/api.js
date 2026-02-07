@@ -1,5 +1,6 @@
 /**
  * API Service for Shifter for ICES
+ * Unified user management with backward compatibility
  */
 
 const API_BASE = '/api';
@@ -63,10 +64,10 @@ class ApiService {
     return data;
   }
 
-  async register(email, password, name, engineerId) {
+  async register(email, password, name) {
     const data = await this.request('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name, engineerId })
+      body: JSON.stringify({ email, password, name })
     });
     this.setToken(data.token);
     return data;
@@ -80,87 +81,104 @@ class ApiService {
     this.setToken(null);
   }
 
-  // Engineers
-  async getEngineers(activeOnly = false) {
-    return this.request(`/engineers?active=${activeOnly}`);
+  // Users (unified user management - replaces engineers)
+  async getUsers(activeOnly = false) {
+    return this.request(`/users?active=${activeOnly}`);
   }
 
-  async getEngineer(id) {
-    return this.request(`/engineers/${id}`);
+  async getUser(id) {
+    return this.request(`/users/${id}`);
   }
 
-  async createEngineer(data) {
-    return this.request('/engineers', {
+  async createUser(data) {
+    return this.request('/users', {
       method: 'POST',
       body: JSON.stringify(data)
     });
   }
 
-  async updateEngineer(id, data) {
-    return this.request(`/engineers/${id}`, {
+  async updateUser(id, data) {
+    return this.request(`/users/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data)
     });
   }
 
-  async deleteEngineer(id) {
-    return this.request(`/engineers/${id}`, {
+  async deleteUser(id) {
+    return this.request(`/users/${id}`, {
       method: 'DELETE'
     });
   }
 
-  async updateEngineerPreferences(id, preferences) {
-    return this.request(`/engineers/${id}/preferences`, {
+  async updateUserPreferences(id, preferences) {
+    return this.request(`/users/${id}/preferences`, {
       method: 'PUT',
       body: JSON.stringify({ preferences })
     });
   }
 
-  async updateEngineerUnavailable(id, unavailableDays) {
-    return this.request(`/engineers/${id}/unavailable`, {
+  async updateUserUnavailable(id, unavailableDays) {
+    return this.request(`/users/${id}/unavailable`, {
       method: 'PUT',
       body: JSON.stringify({ unavailableDays })
     });
   }
 
-  async getEngineerHolidays(id, year) {
-    return this.request(`/engineers/${id}/holidays?year=${year}`);
+  async getUserHolidays(id, year) {
+    return this.request(`/users/${id}/holidays?year=${year}`);
   }
 
   async getStates() {
-    return this.request('/engineers/states');
+    return this.request('/users/states');
   }
 
-  // Engineer unavailable dates (enhanced)
-  async getEngineerUnavailableDates(id) {
-    return this.request(`/engineers/${id}/unavailable-dates`);
+  async getUserNotifications(id) {
+    return this.request(`/users/${id}/notifications`);
   }
 
-  async addEngineerUnavailableDates(id, dates) {
-    return this.request(`/engineers/${id}/unavailable-dates`, {
+  async markNotificationRead(userId, notificationId) {
+    return this.request(`/users/${userId}/notifications/${notificationId}/read`, {
+      method: 'POST'
+    });
+  }
+
+  async resetUserPassword(userId, newPassword, generateNew = false, sendEmail = false) {
+    return this.request(`/users/${userId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ newPassword, generateNew, sendEmail })
+    });
+  }
+
+  // User unavailable dates
+  async getUserUnavailableDates(id) {
+    return this.request(`/users/${id}/unavailable-dates`);
+  }
+
+  async addUserUnavailableDates(id, dates) {
+    return this.request(`/users/${id}/unavailable-dates`, {
       method: 'POST',
       body: JSON.stringify({ dates })
     });
   }
 
-  async removeEngineerUnavailableDates(id, dates) {
-    return this.request(`/engineers/${id}/unavailable-dates`, {
+  async removeUserUnavailableDates(id, dates) {
+    return this.request(`/users/${id}/unavailable-dates`, {
       method: 'DELETE',
       body: JSON.stringify({ dates })
     });
   }
 
-  // Engineer bulk upload (Excel)
-  async bulkUploadEngineersExcel(excelData) {
-    return this.request('/engineers/bulk-upload-excel', {
+  // User bulk upload
+  async bulkUploadUsersExcel(excelData) {
+    return this.request('/users/bulk-upload-excel', {
       method: 'POST',
       body: JSON.stringify({ excelData })
     });
   }
 
-  // Engineer export
-  async exportEngineersCSV() {
-    const response = await fetch(`${API_BASE}/engineers/export/csv`, {
+  // User export
+  async exportUsersCSV() {
+    const response = await fetch(`${API_BASE}/users/export/csv`, {
       headers: {
         'Authorization': `Bearer ${this.getToken()}`
       }
@@ -168,13 +186,70 @@ class ApiService {
     return response.blob();
   }
 
-  async exportEngineersExcel() {
-    const response = await fetch(`${API_BASE}/engineers/export/excel`, {
+  async exportUsersExcel() {
+    const response = await fetch(`${API_BASE}/users/export/excel`, {
       headers: {
         'Authorization': `Bearer ${this.getToken()}`
       }
     });
     return response.blob();
+  }
+
+  // Legacy engineer endpoints (backward compatibility - maps to users)
+  async getEngineers(activeOnly = false) {
+    return this.getUsers(activeOnly);
+  }
+
+  async getEngineer(id) {
+    return this.getUser(id);
+  }
+
+  async createEngineer(data) {
+    return this.createUser(data);
+  }
+
+  async updateEngineer(id, data) {
+    return this.updateUser(id, data);
+  }
+
+  async deleteEngineer(id) {
+    return this.deleteUser(id);
+  }
+
+  async updateEngineerPreferences(id, preferences) {
+    return this.updateUserPreferences(id, preferences);
+  }
+
+  async updateEngineerUnavailable(id, unavailableDays) {
+    return this.updateUserUnavailable(id, unavailableDays);
+  }
+
+  async getEngineerHolidays(id, year) {
+    return this.getUserHolidays(id, year);
+  }
+
+  async getEngineerUnavailableDates(id) {
+    return this.getUserUnavailableDates(id);
+  }
+
+  async addEngineerUnavailableDates(id, dates) {
+    return this.addUserUnavailableDates(id, dates);
+  }
+
+  async removeEngineerUnavailableDates(id, dates) {
+    return this.removeUserUnavailableDates(id, dates);
+  }
+
+  async bulkUploadEngineersExcel(excelData) {
+    return this.bulkUploadUsersExcel(excelData);
+  }
+
+  async exportEngineersCSV() {
+    return this.exportUsersCSV();
+  }
+
+  async exportEngineersExcel() {
+    return this.exportUsersExcel();
   }
 
   // Schedules
@@ -193,6 +268,10 @@ class ApiService {
 
   async getEngineerViewSchedule(year, month) {
     return this.request(`/schedules/engineer-view/${year}/${month}`);
+  }
+
+  async getUserViewSchedule(year, month) {
+    return this.request(`/schedules/user-view/${year}/${month}`);
   }
 
   async generateSchedule(year, month, options = {}) {
@@ -247,6 +326,18 @@ class ApiService {
     return this.request(`/schedules/holidays/${year}/${month}`);
   }
 
+  async getLatestPublishedSchedule() {
+    return this.request('/schedules/latest-published');
+  }
+
+  async deleteSchedule(id) {
+    return this.request(`/schedules/${id}`, { method: 'DELETE' });
+  }
+
+  async getRecentPublishedSchedules(count = 4) {
+    return this.request(`/schedules/recent-published?count=${count}`);
+  }
+
   // Requests
   async getRequests(filters = {}) {
     const params = new URLSearchParams(filters);
@@ -290,6 +381,10 @@ class ApiService {
 
   async getRequestTypes() {
     return this.request('/requests/types/list');
+  }
+
+  async getMyRequests() {
+    return this.request('/requests/my');
   }
 
   // System / Admin
@@ -349,7 +444,7 @@ class ApiService {
     });
   }
 
-  async getUsers() {
+  async getSystemUsers() {
     return this.request('/system/users');
   }
 
@@ -357,13 +452,6 @@ class ApiService {
     return this.request(`/system/users/${userId}/notifications`, {
       method: 'PUT',
       body: JSON.stringify({ emailNotifications })
-    });
-  }
-
-  async linkUserToEngineer(userId, engineerId) {
-    return this.request(`/system/users/${userId}/engineer-link`, {
-      method: 'PUT',
-      body: JSON.stringify({ engineerId })
     });
   }
 
@@ -383,6 +471,14 @@ class ApiService {
     return this.request('/auth/admin/reset-password', {
       method: 'POST',
       body: JSON.stringify({ userId, newPassword, generateNew, sendEmail })
+    });
+  }
+
+  // Profile update
+  async updateProfile(data) {
+    return this.request('/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data)
     });
   }
 
@@ -432,6 +528,13 @@ class ApiService {
     });
   }
 
+  async toggleUserManager(userId, isManager) {
+    return this.request(`/auth/admin/user/${userId}/manager`, {
+      method: 'PUT',
+      body: JSON.stringify({ isManager })
+    });
+  }
+
   async adminManage2FA(userId, action) {
     return this.request(`/auth/admin/user/${userId}/2fa`, {
       method: 'PUT',
@@ -439,12 +542,9 @@ class ApiService {
     });
   }
 
-  // Engineer password management
+  // Legacy password management (backward compatibility)
   async resetEngineerPassword(engineerId, newPassword, generateNew, sendEmail) {
-    return this.request(`/engineers/${engineerId}/reset-password`, {
-      method: 'POST',
-      body: JSON.stringify({ newPassword, generateNew, sendEmail })
-    });
+    return this.resetUserPassword(engineerId, newPassword, generateNew, sendEmail);
   }
 
   async createEngineerUser(engineerId, password, generatePassword, sendEmail, isAdmin) {
@@ -452,16 +552,6 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ password, generatePassword, sendEmail, isAdmin })
     });
-  }
-
-  // Latest published schedule
-  async getLatestPublishedSchedule() {
-    return this.request('/schedules/latest-published');
-  }
-
-  // Delete schedule
-  async deleteSchedule(id) {
-    return this.request(`/schedules/${id}`, { method: 'DELETE' });
   }
 }
 

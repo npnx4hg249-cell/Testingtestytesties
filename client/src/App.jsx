@@ -5,7 +5,7 @@ import api from './services/api';
 // Pages
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import Engineers from './pages/Engineers';
+import Users from './pages/Users';
 import EngineerUnavailability from './pages/EngineerUnavailability';
 import Schedules from './pages/Schedules';
 import ScheduleView from './pages/ScheduleView';
@@ -15,6 +15,7 @@ import Requests from './pages/Requests';
 import MyRequests from './pages/MyRequests';
 import Profile from './pages/Profile';
 import AdminSettings from './pages/AdminSettings';
+import UserDashboard from './pages/UserDashboard';
 
 // Session timeout: 1 hour
 const SESSION_TIMEOUT_MS = 60 * 60 * 1000;
@@ -145,8 +146,8 @@ function AuthProvider({ children }) {
     logout,
     darkMode,
     toggleDarkMode,
-    isManager: user?.role === 'admin' || user?.role === 'manager',
-    isAdmin: user?.role === 'admin'
+    isManager: user?.isAdmin || user?.isManager,
+    isAdmin: user?.isAdmin
   };
 
   if (loading) {
@@ -182,7 +183,7 @@ function ManagerRoute({ children }) {
   }
 
   if (!isManager) {
-    return <Navigate to="/my-requests" replace />;
+    return <Navigate to="/user-dashboard" replace />;
   }
 
   return children;
@@ -200,6 +201,15 @@ function Header() {
 
   const isActive = (path) => location.pathname === path ? 'active' : '';
 
+  // Determine user role text
+  const getRoleText = () => {
+    if (user?.isAdmin) return 'Admin';
+    if (user?.isManager) return 'Manager';
+    if (user?.inTraining) return 'In Training';
+    if (user?.isFloater) return 'Floater';
+    return 'User';
+  };
+
   return (
     <header className="header">
       <h1 style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
@@ -207,13 +217,15 @@ function Header() {
         <span style={{ fontSize: '0.5em', opacity: 0.8 }}>for ICES</span>
       </h1>
       <nav>
-        {isManager && (
+        {isManager ? (
           <>
             <Link to="/" className={isActive('/')}>Dashboard</Link>
-            <Link to="/engineers" className={isActive('/engineers')}>Engineers</Link>
+            <Link to="/users" className={isActive('/users')}>Users</Link>
             <Link to="/schedules" className={isActive('/schedules')}>Schedules</Link>
             <Link to="/requests" className={isActive('/requests')}>Requests</Link>
           </>
+        ) : (
+          <Link to="/user-dashboard" className={isActive('/user-dashboard')}>Dashboard</Link>
         )}
         <Link to="/my-schedule" className={isActive('/my-schedule')}>My Schedule</Link>
         <Link to="/my-requests" className={isActive('/my-requests')}>My Requests</Link>
@@ -238,7 +250,7 @@ function Header() {
         >
           {darkMode ? '☀️' : '🌙'}
         </button>
-        <span>{user?.name} ({user?.role})</span>
+        <span>{user?.name} ({getRoleText()})</span>
         <button className="btn btn-outline" onClick={handleLogout} style={{ color: 'white', borderColor: 'rgba(255,255,255,0.5)' }}>
           Logout
         </button>
@@ -266,11 +278,14 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to={isManager ? '/' : '/my-schedule'} replace /> : <Login />} />
+      <Route path="/login" element={user ? <Navigate to={isManager ? '/' : '/user-dashboard'} replace /> : <Login />} />
 
       {/* Manager routes */}
       <Route path="/" element={<ManagerRoute><Dashboard /></ManagerRoute>} />
-      <Route path="/engineers" element={<ManagerRoute><Engineers /></ManagerRoute>} />
+      <Route path="/users" element={<ManagerRoute><Users /></ManagerRoute>} />
+      <Route path="/users/:id/availability" element={<ManagerRoute><EngineerUnavailability /></ManagerRoute>} />
+      {/* Legacy engineer routes - redirect to users */}
+      <Route path="/engineers" element={<Navigate to="/users" replace />} />
       <Route path="/engineers/:id/availability" element={<ManagerRoute><EngineerUnavailability /></ManagerRoute>} />
       <Route path="/schedules" element={<ManagerRoute><Schedules /></ManagerRoute>} />
       <Route path="/schedules/:id" element={<PrivateRoute><ScheduleView /></PrivateRoute>} />
@@ -280,13 +295,14 @@ function AppRoutes() {
       {/* Admin routes */}
       <Route path="/admin" element={<AdminRoute><AdminSettings /></AdminRoute>} />
 
-      {/* Engineer routes */}
+      {/* User routes */}
+      <Route path="/user-dashboard" element={<PrivateRoute><UserDashboard /></PrivateRoute>} />
       <Route path="/my-schedule" element={<PrivateRoute><MySchedule /></PrivateRoute>} />
       <Route path="/my-requests" element={<PrivateRoute><MyRequests /></PrivateRoute>} />
       <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
 
       {/* Fallback */}
-      <Route path="*" element={<Navigate to={user ? (isManager ? '/' : '/my-schedule') : '/login'} replace />} />
+      <Route path="*" element={<Navigate to={user ? (isManager ? '/' : '/user-dashboard') : '/login'} replace />} />
     </Routes>
   );
 }

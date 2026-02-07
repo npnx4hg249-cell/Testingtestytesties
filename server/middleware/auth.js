@@ -3,8 +3,8 @@
  *
  * JWT-based authentication with security features:
  * - Strong password validation
- * - Account lockout after failed attempts
- * - Auto sign-out after inactivity
+ * - Account lockout after 4 failed attempts
+ * - Auto sign-out after 1 hour inactivity
  * - 2FA support
  */
 
@@ -13,40 +13,24 @@ import { getById, update, getAll } from '../data/store.js';
 
 // Secret key for JWT (in production, use environment variable)
 const JWT_SECRET = process.env.JWT_SECRET || 'shifter-ices-secret-key-change-in-production';
-const JWT_EXPIRES_IN = '8h'; // Cookie lifetime
+const JWT_EXPIRES_IN = '8h'; // 8-hour cookie lifetime
 const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour auto sign-out
 
 // Failed login tracking (in-memory, would be in DB in production)
 const failedAttempts = new Map();
 const MAX_FAILED_ATTEMPTS = 4;
-const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const LOCKOUT_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 
 // Common passwords to deny
-const COMMON_PASSWORDS = [
+const COMMON_WORDS = [
   'password', '123456', '12345678', 'qwerty', 'abc123', 'monkey', '1234567',
   'letmein', 'trustno1', 'dragon', 'baseball', 'iloveyou', 'master', 'sunshine',
-  'ashley', 'bailey', 'shadow', '123123', '654321', 'superman', 'qazwsx',
-  'michael', 'football', 'password1', 'password123', 'welcome', 'jesus', 'ninja',
-  'mustang', 'password2', 'admin', 'admin123', 'root', 'toor', 'pass', 'test',
-  'guest', 'master123', 'changeme', 'hello', 'charlie', '112233', '121212',
-  'computer', 'tigger', 'jennifer', 'hunter', 'pepper', 'soccer', 'hockey'
-];
-
-// Dictionary words (common English words to check against)
-const DICTIONARY_WORDS = [
-  'apple', 'banana', 'orange', 'house', 'water', 'fire', 'earth', 'wind',
-  'summer', 'winter', 'spring', 'autumn', 'monday', 'friday', 'january',
-  'december', 'hello', 'world', 'company', 'office', 'building', 'phone',
-  'email', 'internet', 'computer', 'laptop', 'desktop', 'server', 'network'
+  'admin', 'admin123', 'root', 'test', 'guest', 'changeme', 'hello', 'welcome',
+  'shifter', 'ices', 'schedule', 'engineer', 'shift', 'user', 'login'
 ];
 
 /**
  * Validate password strength
- * Requirements:
- * - Min 10 characters
- * - At least one special character
- * - At least one number
- * - Not a common password or dictionary word
  */
 export function validatePasswordStrength(password) {
   const errors = [];
@@ -71,28 +55,23 @@ export function validatePasswordStrength(password) {
     errors.push('Password must contain at least one uppercase letter');
   }
 
-  // Check for common passwords
+  // Check for common words
   const lowerPass = password.toLowerCase();
-  if (COMMON_PASSWORDS.some(common => lowerPass.includes(common))) {
-    errors.push('Password contains a commonly used password pattern');
-  }
-
-  // Check for dictionary words (3+ letters)
-  for (const word of DICTIONARY_WORDS) {
-    if (lowerPass.includes(word) && word.length >= 4) {
-      errors.push('Password contains a dictionary word');
+  for (const word of COMMON_WORDS) {
+    if (lowerPass.includes(word)) {
+      errors.push('Password contains a common word or pattern');
       break;
     }
   }
 
-  // Check for sequential characters
+  // Check for repeated characters
   if (/(.)\1{2,}/.test(password)) {
     errors.push('Password cannot contain 3 or more repeated characters');
   }
 
-  // Check for sequential numbers
-  if (/012|123|234|345|456|567|678|789|890/.test(password)) {
-    errors.push('Password cannot contain sequential numbers');
+  // Check for sequential patterns
+  if (/012|123|234|345|456|567|678|789|890|abc|bcd|cde/.test(lowerPass)) {
+    errors.push('Password cannot contain sequential characters');
   }
 
   return {
@@ -133,6 +112,7 @@ export function generateStrongPassword(length = 16) {
  * Check if account is locked
  */
 export function isAccountLocked(email) {
+  if (!email) return false;
   const record = failedAttempts.get(email.toLowerCase());
   if (!record) return false;
 
@@ -175,7 +155,9 @@ export function recordFailedAttempt(email) {
  * Clear failed attempts on successful login
  */
 export function clearFailedAttempts(email) {
-  failedAttempts.delete(email.toLowerCase());
+  if (email) {
+    failedAttempts.delete(email.toLowerCase());
+  }
 }
 
 /**
@@ -201,7 +183,9 @@ export function getLockedAccounts() {
  * Unlock an account manually (admin only)
  */
 export function unlockAccount(email) {
-  failedAttempts.delete(email.toLowerCase());
+  if (email) {
+    failedAttempts.delete(email.toLowerCase());
+  }
 }
 
 /**
@@ -212,8 +196,8 @@ export function generateToken(user) {
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role,
-    engineerId: user.engineerId,
+    isAdmin: user.isAdmin || false,
+    isManager: user.isManager || false,
     issuedAt: Date.now()
   };
 
@@ -233,16 +217,12 @@ export function verifyToken(token) {
 
 /**
  * Authentication middleware
- * Requires valid JWT token in Authorization header
- * Enforces 1-hour inactivity timeout
  */
 export function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
-    return res.status(401).json({
-      error: 'No authorization header provided'
-    });
+    return res.status(401).json({ error: 'No authorization header provided' });
   }
 
   const parts = authHeader.split(' ');
@@ -258,13 +238,24 @@ export function authenticate(req, res, next) {
 
   if (!decoded) {
     return res.status(401).json({
-      error: 'Invalid or expired token'
+      error: 'Invalid or expired token',
+      code: 'SESSION_TIMEOUT'
     });
   }
 
-  // Check session timeout (1 hour inactivity)
+  // Get fresh user data from store
   const user = getById('users', decoded.id);
-  if (user && user.lastActivity) {
+
+  if (!user) {
+    return res.status(401).json({ error: 'User no longer exists' });
+  }
+
+  if (!user.isActive) {
+    return res.status(401).json({ error: 'Account is deactivated' });
+  }
+
+  // Check session timeout (1 hour inactivity)
+  if (user.lastActivity) {
     const lastActivity = new Date(user.lastActivity).getTime();
     if (Date.now() - lastActivity > SESSION_TIMEOUT_MS) {
       return res.status(401).json({
@@ -274,25 +265,21 @@ export function authenticate(req, res, next) {
     }
   }
 
-  // Update last activity
-  if (user) {
+  // Update last activity (but not for every request - only if > 1 min since last update)
+  const lastUpdate = user.lastActivity ? new Date(user.lastActivity).getTime() : 0;
+  if (Date.now() - lastUpdate > 60000) {
     update('users', user.id, { lastActivity: new Date().toISOString() });
-  }
-
-  // Verify user still exists
-  if (!user) {
-    return res.status(401).json({
-      error: 'User no longer exists'
-    });
   }
 
   // Attach user info to request
   req.user = {
-    id: decoded.id,
-    email: decoded.email,
-    name: decoded.name,
-    role: decoded.role,
-    engineerId: decoded.engineerId
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    isAdmin: user.isAdmin || false,
+    isManager: user.isManager || false,
+    isFloater: user.isFloater || false,
+    inTraining: user.inTraining || false
   };
 
   next();
@@ -300,46 +287,37 @@ export function authenticate(req, res, next) {
 
 /**
  * Admin authorization middleware
- * Must be used after authenticate middleware
  */
 export function requireAdmin(req, res, next) {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({
-      error: 'Admin access required'
-    });
+  if (!req.user.isAdmin) {
+    return res.status(403).json({ error: 'Admin access required' });
   }
-
   next();
 }
 
 /**
  * Manager or Admin authorization middleware
- * Must be used after authenticate middleware
  */
 export function requireManager(req, res, next) {
-  if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-    return res.status(403).json({
-      error: 'Manager or admin access required'
-    });
+  if (!req.user.isAdmin && !req.user.isManager) {
+    return res.status(403).json({ error: 'Manager or admin access required' });
   }
-
   next();
 }
 
 /**
- * Engineer authorization middleware
- * Allows access only if the user is the engineer or is a manager/admin
+ * User authorization middleware - allows access to own data or managers
  */
 export function requireEngineerOrManager(req, res, next) {
-  const requestedEngineerId = req.params.engineerId || req.body.engineerId;
+  const requestedId = req.params.id || req.params.userId || req.body.userId;
 
-  // Admins and managers can access any engineer
-  if (req.user.role === 'admin' || req.user.role === 'manager') {
+  // Admins and managers can access any user
+  if (req.user.isAdmin || req.user.isManager) {
     return next();
   }
 
-  // Engineers can only access their own data
-  if (req.user.engineerId === requestedEngineerId) {
+  // Users can only access their own data
+  if (req.user.id === requestedId) {
     return next();
   }
 
@@ -348,11 +326,15 @@ export function requireEngineerOrManager(req, res, next) {
   });
 }
 
+// Alias for backward compatibility
+export const trackFailedAttempt = recordFailedAttempt;
+
 export default {
   validatePasswordStrength,
   generateStrongPassword,
   isAccountLocked,
   recordFailedAttempt,
+  trackFailedAttempt,
   clearFailedAttempts,
   getLockedAccounts,
   unlockAccount,

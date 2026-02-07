@@ -18,8 +18,8 @@ import {
   createUser,
   getById,
   update,
-  findOne,
-  getAll
+  getAll,
+  addNotification
 } from '../data/store.js';
 import {
   generateToken,
@@ -31,7 +31,8 @@ import {
   clearFailedAttempts,
   getLockedAccounts,
   unlockAccount,
-  requireAdmin
+  requireAdmin,
+  requireManager
 } from '../middleware/auth.js';
 
 const router = Router();
@@ -39,15 +40,12 @@ const router = Router();
 /**
  * POST /api/auth/login
  * Login with email and password
- * Includes account lockout protection
  */
 router.post('/login', (req, res) => {
   const { email, password, totpCode } = req.body;
 
   if (!email || !password) {
-    return res.status(400).json({
-      error: 'Email and password are required'
-    });
+    return res.status(400).json({ error: 'Email and password are required' });
   }
 
   // Check if account is locked
@@ -62,9 +60,11 @@ router.post('/login', (req, res) => {
 
   if (!user) {
     recordFailedAttempt(email);
-    return res.status(401).json({
-      error: 'Invalid email or password'
-    });
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+
+  if (!user.isActive) {
+    return res.status(401).json({ error: 'Account is deactivated' });
   }
 
   if (!validatePassword(user, password)) {
@@ -75,9 +75,7 @@ router.post('/login', (req, res) => {
         code: 'ACCOUNT_LOCKED'
       });
     }
-    return res.status(401).json({
-      error: 'Invalid email or password'
-    });
+    return res.status(401).json({ error: 'Invalid email or password' });
   }
 
   // Check 2FA if enabled
@@ -97,9 +95,7 @@ router.post('/login', (req, res) => {
     });
 
     if (!verified) {
-      return res.status(401).json({
-        error: 'Invalid 2FA code'
-      });
+      return res.status(401).json({ error: 'Invalid 2FA code' });
     }
   }
 
@@ -107,7 +103,10 @@ router.post('/login', (req, res) => {
   clearFailedAttempts(email);
 
   // Update last login
-  update('users', user.id, { lastLogin: new Date().toISOString() });
+  update('users', user.id, {
+    lastLogin: new Date().toISOString(),
+    lastActivity: new Date().toISOString()
+  });
 
   const token = generateToken(user);
 
@@ -117,25 +116,27 @@ router.post('/login', (req, res) => {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
-      engineerId: user.engineerId,
+      isAdmin: user.isAdmin || false,
+      isManager: user.isManager || false,
+      isFloater: user.isFloater || false,
+      inTraining: user.inTraining || false,
       twoFactorEnabled: user.twoFactorEnabled || false,
-      darkMode: user.darkMode || false
+      twoFactorForced: user.twoFactorForced || false,
+      darkMode: user.darkMode || false,
+      needsPasswordChange: user.needsPasswordChange || false
     }
   });
 });
 
 /**
  * POST /api/auth/register
- * Register a new user (engineers self-register, linked to engineer record)
+ * Register a new user (self-registration)
  */
 router.post('/register', (req, res) => {
-  const { email, password, name, engineerId } = req.body;
+  const { email, password, name } = req.body;
 
   if (!email || !password || !name) {
-    return res.status(400).json({
-      error: 'Email, password, and name are required'
-    });
+    return res.status(400).json({ error: 'Email, password, and name are required' });
   }
 
   // Validate password strength
@@ -149,41 +150,18 @@ router.post('/register', (req, res) => {
 
   // Check if email already exists
   const existingUser = findUserByEmail(email);
-
   if (existingUser) {
-    return res.status(400).json({
-      error: 'Email already registered'
-    });
-  }
-
-  // Check if email is already used by an engineer
-  const engineers = getAll('engineers');
-  const emailInUse = engineers.find(e =>
-    e.email && e.email.toLowerCase() === email.toLowerCase()
-  );
-
-  if (emailInUse && (!engineerId || emailInUse.id !== engineerId)) {
-    return res.status(400).json({
-      error: 'This email is already associated with an engineer profile'
-    });
-  }
-
-  // If engineerId provided, verify it exists
-  if (engineerId) {
-    const engineer = getById('engineers', engineerId);
-    if (!engineer) {
-      return res.status(400).json({
-        error: 'Invalid engineer ID'
-      });
-    }
+    return res.status(400).json({ error: 'Email already registered' });
   }
 
   const user = createUser({
     email,
     password,
     name,
-    role: 'engineer',
-    engineerId
+    isAdmin: false,
+    isManager: false,
+    isFloater: false,
+    inTraining: false
   });
 
   const token = generateToken(user);
@@ -194,8 +172,8 @@ router.post('/register', (req, res) => {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
-      engineerId: user.engineerId
+      isAdmin: user.isAdmin,
+      isManager: user.isManager
     }
   });
 });
@@ -208,20 +186,26 @@ router.get('/me', authenticate, (req, res) => {
   const user = getById('users', req.user.id);
 
   if (!user) {
-    return res.status(404).json({
-      error: 'User not found'
-    });
+    return res.status(404).json({ error: 'User not found' });
   }
 
   res.json({
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role,
-    engineerId: user.engineerId,
+    isAdmin: user.isAdmin || false,
+    isManager: user.isManager || false,
+    isFloater: user.isFloater || false,
+    inTraining: user.inTraining || false,
+    tier: user.tier || 'T2',
+    state: user.state,
+    preferences: user.preferences || [],
     twoFactorEnabled: user.twoFactorEnabled || false,
+    twoFactorForced: user.twoFactorForced || false,
     darkMode: user.darkMode || false,
-    emailNotifications: user.emailNotifications !== false
+    emailNotifications: user.emailNotifications !== false,
+    needsPasswordChange: user.needsPasswordChange || false,
+    notifications: user.notifications || []
   });
 });
 
@@ -241,9 +225,7 @@ router.post('/change-password', authenticate, async (req, res) => {
   const user = getById('users', req.user.id);
 
   if (!validatePassword(user, currentPassword)) {
-    return res.status(401).json({
-      error: 'Current password is incorrect'
-    });
+    return res.status(401).json({ error: 'Current password is incorrect' });
   }
 
   // Validate new password strength
@@ -256,11 +238,12 @@ router.post('/change-password', authenticate, async (req, res) => {
   }
 
   const hashedPassword = bcrypt.hashSync(newPassword, 10);
-  update('users', user.id, { password: hashedPassword });
-
-  res.json({
-    message: 'Password changed successfully'
+  update('users', user.id, {
+    password: hashedPassword,
+    needsPasswordChange: false
   });
+
+  res.json({ message: 'Password changed successfully' });
 });
 
 /**
@@ -280,9 +263,7 @@ router.post('/2fa/setup', authenticate, async (req, res) => {
   const user = getById('users', req.user.id);
 
   if (user.twoFactorEnabled) {
-    return res.status(400).json({
-      error: '2FA is already enabled for this account'
-    });
+    return res.status(400).json({ error: '2FA is already enabled for this account' });
   }
 
   // Generate secret
@@ -316,9 +297,7 @@ router.post('/2fa/verify', authenticate, (req, res) => {
   const user = getById('users', req.user.id);
 
   if (!user.twoFactorSecret || !user.twoFactorPending) {
-    return res.status(400).json({
-      error: 'Please set up 2FA first'
-    });
+    return res.status(400).json({ error: 'Please set up 2FA first' });
   }
 
   const verified = speakeasy.totp.verify({
@@ -329,19 +308,16 @@ router.post('/2fa/verify', authenticate, (req, res) => {
   });
 
   if (!verified) {
-    return res.status(400).json({
-      error: 'Invalid verification code'
-    });
+    return res.status(400).json({ error: 'Invalid verification code' });
   }
 
   update('users', user.id, {
     twoFactorEnabled: true,
-    twoFactorPending: false
+    twoFactorPending: false,
+    twoFactorForced: false
   });
 
-  res.json({
-    message: '2FA has been enabled successfully'
-  });
+  res.json({ message: '2FA has been enabled successfully' });
 });
 
 /**
@@ -353,15 +329,11 @@ router.post('/2fa/disable', authenticate, (req, res) => {
   const user = getById('users', req.user.id);
 
   if (!user.twoFactorEnabled) {
-    return res.status(400).json({
-      error: '2FA is not enabled for this account'
-    });
+    return res.status(400).json({ error: '2FA is not enabled for this account' });
   }
 
   if (!validatePassword(user, password)) {
-    return res.status(401).json({
-      error: 'Invalid password'
-    });
+    return res.status(401).json({ error: 'Invalid password' });
   }
 
   update('users', user.id, {
@@ -370,9 +342,7 @@ router.post('/2fa/disable', authenticate, (req, res) => {
     twoFactorPending: false
   });
 
-  res.json({
-    message: '2FA has been disabled'
-  });
+  res.json({ message: '2FA has been disabled' });
 });
 
 /**
@@ -397,6 +367,35 @@ router.put('/preferences', authenticate, (req, res) => {
 });
 
 /**
+ * PUT /api/auth/profile
+ * Update user profile (name, email)
+ */
+router.put('/profile', authenticate, (req, res) => {
+  const { name, email } = req.body;
+  const user = getById('users', req.user.id);
+  const updates = {};
+
+  if (name) updates.name = name;
+
+  if (email && email !== user.email) {
+    // Check email uniqueness
+    const existingUser = findUserByEmail(email);
+    if (existingUser && existingUser.id !== user.id) {
+      return res.status(400).json({ error: 'Email is already in use' });
+    }
+    updates.email = email;
+  }
+
+  update('users', user.id, updates);
+
+  res.json({
+    message: 'Profile updated',
+    name: updates.name || user.name,
+    email: updates.email || user.email
+  });
+});
+
+/**
  * GET /api/auth/locked-accounts
  * Get list of locked accounts (admin only)
  */
@@ -417,17 +416,15 @@ router.post('/unlock-account', authenticate, requireAdmin, (req, res) => {
 
   unlockAccount(email);
 
-  res.json({
-    message: `Account ${email} has been unlocked`
-  });
+  res.json({ message: `Account ${email} has been unlocked` });
 });
 
 /**
  * POST /api/auth/admin/reset-password
  * Admin reset password for a user
  */
-router.post('/admin/reset-password', authenticate, requireAdmin, (req, res) => {
-  const { userId, newPassword, generateNew } = req.body;
+router.post('/admin/reset-password', authenticate, requireManager, (req, res) => {
+  const { userId, newPassword, generateNew, sendEmail } = req.body;
 
   const user = getById('users', userId);
   if (!user) {
@@ -435,7 +432,6 @@ router.post('/admin/reset-password', authenticate, requireAdmin, (req, res) => {
   }
 
   let password = newPassword;
-
   if (generateNew) {
     password = generateStrongPassword(16);
   }
@@ -456,7 +452,16 @@ router.post('/admin/reset-password', authenticate, requireAdmin, (req, res) => {
   }
 
   const hashedPassword = bcrypt.hashSync(password, 10);
-  update('users', userId, { password: hashedPassword });
+  update('users', userId, {
+    password: hashedPassword,
+    needsPasswordChange: true
+  });
+
+  // Add notification to user
+  addNotification(userId, {
+    type: 'password_reset',
+    message: 'Your password has been reset by an administrator.'
+  });
 
   res.json({
     message: 'Password has been reset',
@@ -465,81 +470,10 @@ router.post('/admin/reset-password', authenticate, requireAdmin, (req, res) => {
 });
 
 /**
- * POST /api/auth/admin/create-admin
- * Create a new admin user (admin only)
- */
-router.post('/admin/create-admin', authenticate, requireAdmin, (req, res) => {
-  const { email, name, password, generatePassword } = req.body;
-
-  if (!email || !name) {
-    return res.status(400).json({
-      error: 'Email and name are required'
-    });
-  }
-
-  // Check if email already exists
-  const existingUser = findUserByEmail(email);
-  if (existingUser) {
-    return res.status(400).json({
-      error: 'Email already registered'
-    });
-  }
-
-  // Check unique email across engineers
-  const engineers = getAll('engineers');
-  const emailInUse = engineers.find(e =>
-    e.email && e.email.toLowerCase() === email.toLowerCase()
-  );
-  if (emailInUse) {
-    return res.status(400).json({
-      error: 'This email is already associated with an engineer profile'
-    });
-  }
-
-  let userPassword = password;
-  if (generatePassword) {
-    userPassword = generateStrongPassword(16);
-  }
-
-  if (!userPassword) {
-    return res.status(400).json({
-      error: 'Please provide a password or set generatePassword to true'
-    });
-  }
-
-  // Validate password strength
-  const passwordValidation = validatePasswordStrength(userPassword);
-  if (!passwordValidation.valid) {
-    return res.status(400).json({
-      error: 'Password does not meet requirements',
-      details: passwordValidation.errors
-    });
-  }
-
-  const user = createUser({
-    email,
-    name,
-    password: userPassword,
-    role: 'admin'
-  });
-
-  res.status(201).json({
-    message: 'Admin user created successfully',
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role
-    },
-    generatedPassword: generatePassword ? userPassword : undefined
-  });
-});
-
-/**
  * PUT /api/auth/admin/user/:id/2fa
  * Admin manage 2FA for a user (force enable/disable)
  */
-router.put('/admin/user/:id/2fa', authenticate, requireAdmin, (req, res) => {
+router.put('/admin/user/:id/2fa', authenticate, requireManager, (req, res) => {
   const { id } = req.params;
   const { action } = req.body; // 'force' or 'disable'
 
@@ -559,43 +493,11 @@ router.put('/admin/user/:id/2fa', authenticate, requireAdmin, (req, res) => {
   }
 
   if (action === 'force') {
-    update('users', id, {
-      twoFactorForced: true
-    });
+    update('users', id, { twoFactorForced: true });
     return res.json({ message: 'User will be required to set up 2FA on next login' });
   }
 
   res.status(400).json({ error: 'Invalid action. Use "force" or "disable"' });
-});
-
-/**
- * PUT /api/auth/admin/user/:id/admin
- * Toggle admin status for a user
- */
-router.put('/admin/user/:id/admin', authenticate, requireAdmin, (req, res) => {
-  const { id } = req.params;
-  const { isAdmin } = req.body;
-
-  const user = getById('users', id);
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
-  }
-
-  // Prevent removing your own admin status
-  if (user.id === req.user.id && !isAdmin) {
-    return res.status(400).json({
-      error: 'You cannot remove your own admin status'
-    });
-  }
-
-  update('users', id, {
-    role: isAdmin ? 'admin' : 'engineer'
-  });
-
-  res.json({
-    message: `User is now ${isAdmin ? 'an admin' : 'a regular user'}`,
-    role: isAdmin ? 'admin' : 'engineer'
-  });
 });
 
 export default router;

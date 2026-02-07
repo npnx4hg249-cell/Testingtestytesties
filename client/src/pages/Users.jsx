@@ -116,8 +116,9 @@ function Users() {
     }
   };
 
-  const openModal = (user = null) => {
-    if (user) {
+  const openModal = (user = null, copyMode = false) => {
+    if (user && !copyMode) {
+      // Edit existing user
       setEditingUser(user);
       setFormData({
         name: user.name,
@@ -133,7 +134,25 @@ function Users() {
         preferences: user.preferences || DEFAULT_PREFERENCES,
         sendEmail: false
       });
+    } else if (user && copyMode) {
+      // Copy user - pre-fill form for new user based on existing
+      setEditingUser(null);
+      setFormData({
+        name: `${user.name} (Copy)`,
+        email: '',  // User must provide unique email
+        password: '',
+        generatePassword: true,
+        tier: user.tier || 'T2',
+        isAdmin: false,  // Don't copy admin status
+        isManager: user.isManager || false,
+        isFloater: user.isFloater || false,
+        inTraining: user.inTraining || false,
+        state: user.state || '',
+        preferences: user.preferences || DEFAULT_PREFERENCES,
+        sendEmail: false
+      });
     } else {
+      // New user from scratch
       setEditingUser(null);
       setFormData({
         name: '',
@@ -224,15 +243,27 @@ function Users() {
     setUploadResults(null);
     setError('');
 
+    const isCSV = file.name.toLowerCase().endsWith('.csv');
+
     try {
       const reader = new FileReader();
       reader.onload = async (e) => {
         try {
-          const base64 = e.target.result.split(',')[1];
-          const response = await api.bulkUploadUsersExcel(base64);
-          setUploadResults(response);
-          if (response.success && response.success.length > 0) {
-            setSuccess(`Successfully imported ${response.success.length} users`);
+          let response;
+          if (isCSV) {
+            // For CSV files, read as text
+            const csvData = e.target.result;
+            response = await api.bulkUploadUsersCSV(csvData);
+          } else {
+            // For Excel files, read as base64
+            const base64 = e.target.result.split(',')[1];
+            response = await api.bulkUploadUsersExcel(base64);
+          }
+          // Server returns { results: { success: [], errors: [] } }
+          setUploadResults(response.results || response);
+          if (response.results?.success?.length > 0 || response.success?.length > 0) {
+            const successCount = response.results?.success?.length || response.success?.length || 0;
+            setSuccess(`Successfully imported ${successCount} users`);
             await loadData();
           }
           setTimeout(() => setSuccess(''), 5000);
@@ -242,7 +273,13 @@ function Users() {
           setUploading(false);
         }
       };
-      reader.readAsDataURL(file);
+
+      // Read CSV as text, Excel as DataURL (base64)
+      if (isCSV) {
+        reader.readAsText(file);
+      } else {
+        reader.readAsDataURL(file);
+      }
     } catch (err) {
       setError(err.message);
       setUploading(false);
@@ -296,6 +333,12 @@ function Users() {
       const response = await fetch(`/api${endpoint}`, {
         headers: { 'Authorization': `Bearer ${api.getToken()}` }
       });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to download template (${response.status})`);
+      }
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -305,6 +348,8 @@ function Users() {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
+      setSuccess(`${format.toUpperCase()} template downloaded`);
+      setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       setError(err.message || 'Failed to download template');
     }
@@ -402,7 +447,9 @@ function Users() {
                   <h4 style={{ color: 'var(--success)' }}>Successfully Imported ({uploadResults.success.length})</h4>
                   <ul>
                     {uploadResults.success.map((item, i) => (
-                      <li key={i} className="success">{item.name} ({item.email})</li>
+                      <li key={i} className="success">
+                        {item.user ? `${item.user.name} (${item.user.email})` : `${item.name} (${item.email})`}
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -452,6 +499,9 @@ function Users() {
                   <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                     <button className="btn btn-outline" style={{ padding: '5px 10px' }} onClick={() => openModal(user)}>
                       Edit
+                    </button>
+                    <button className="btn btn-outline" style={{ padding: '5px 10px' }} onClick={() => openModal(user, true)} title="Copy user as template">
+                      Copy
                     </button>
                     <Link to={`/users/${user.id}/availability`} className="btn btn-outline" style={{ padding: '5px 10px', textDecoration: 'none' }}>
                       Availability

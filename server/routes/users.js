@@ -105,6 +105,132 @@ router.get('/shift-options', (req, res) => {
 });
 
 /**
+ * GET /api/users/csv-template
+ * Download CSV template for bulk upload
+ */
+router.get('/csv-template', (req, res) => {
+  const template = `name,email,password,tier,isFloater,inTraining,isManager,state,preferences
+"John Doe",john.doe@example.com,SecurePass123!,T2,false,false,false,BY,"Early,Morning,Late,Night,WeekendEarly,WeekendMorning,WeekendLate,WeekendNight"
+"Jane Smith",jane.smith@example.com,StrongPass456!,T1,false,true,false,NW,"Early,Morning,WeekendMorning"
+"Bob Manager",bob.manager@example.com,ManagerPass789!,T2,false,false,true,BE,"Late,Night,WeekendLate,WeekendNight"`;
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=users-template.csv');
+  res.send(template);
+});
+
+/**
+ * GET /api/users/excel-template
+ * Download Excel template for bulk upload
+ */
+router.get('/excel-template', (req, res) => {
+  const templateData = [
+    {
+      Name: 'John Doe',
+      Email: 'john.doe@example.com',
+      Password: 'SecurePass123!',
+      Tier: 'T2',
+      IsFloater: 'false',
+      InTraining: 'false',
+      IsManager: 'false',
+      State: 'BY',
+      Preferences: 'Early,Morning,Late,Night,WeekendEarly,WeekendMorning,WeekendLate,WeekendNight'
+    },
+    {
+      Name: 'Jane Smith',
+      Email: 'jane.smith@example.com',
+      Password: 'StrongPass456!',
+      Tier: 'T1',
+      IsFloater: 'false',
+      InTraining: 'true',
+      IsManager: 'false',
+      State: 'NW',
+      Preferences: 'Early,Morning,WeekendMorning'
+    }
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(templateData);
+  XLSX.utils.book_append_sheet(wb, ws, 'Users');
+
+  const instructions = [
+    ['Shifter for ICES - User Import Template'],
+    [''],
+    ['Instructions:'],
+    ['1. Fill in user data in the Users sheet'],
+    ['2. Required fields: Name, Email, Password'],
+    ['3. Password requirements: Min 10 chars, special character, number'],
+    ['4. Tier: T1, T2, or T3 (default: T2)'],
+    ['5. IsFloater, InTraining, IsManager: true or false'],
+    ['6. State: German state code (BY, NW, BE, etc.)'],
+    [''],
+    ['Valid States:'],
+    ...getAllStates().map(s => [`${s.code}: ${s.name}`])
+  ];
+
+  const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
+  XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instructions');
+
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename=users-template.xlsx');
+  res.send(buffer);
+});
+
+/**
+ * GET /api/users/export/csv
+ * Export all users as CSV
+ */
+router.get('/export/csv', authenticate, requireManager, (req, res) => {
+  const users = getAll('users');
+
+  const header = 'name,email,tier,isFloater,inTraining,isManager,isAdmin,state,preferences,isActive';
+  const rows = users.map(u => {
+    const prefs = (u.preferences || []).join(',');
+    return `"${u.name}","${u.email}","${u.tier}","${u.isFloater}","${u.inTraining}","${u.isManager}","${u.isAdmin}","${u.state || ''}","${prefs}","${u.isActive}"`;
+  });
+
+  const csv = [header, ...rows].join('\n');
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=users-export.csv');
+  res.send(csv);
+});
+
+/**
+ * GET /api/users/export/excel
+ * Export all users as Excel
+ */
+router.get('/export/excel', authenticate, requireManager, (req, res) => {
+  const users = getAll('users');
+
+  const data = users.map(u => ({
+    Name: u.name,
+    Email: u.email,
+    Tier: u.tier,
+    IsFloater: u.isFloater,
+    InTraining: u.inTraining,
+    IsManager: u.isManager,
+    IsAdmin: u.isAdmin,
+    State: u.state || '',
+    Preferences: (u.preferences || []).join(', '),
+    IsActive: u.isActive,
+    CreatedAt: u.createdAt
+  }));
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(data);
+  XLSX.utils.book_append_sheet(wb, ws, 'Users');
+
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename=users-export.xlsx');
+  res.send(buffer);
+});
+
+/**
  * GET /api/users/:id
  * Get user by ID
  */
@@ -933,132 +1059,6 @@ router.post('/bulk-upload-excel', authenticate, requireManager, async (req, res)
   } catch (error) {
     res.status(400).json({ error: 'Failed to parse Excel file: ' + error.message });
   }
-});
-
-/**
- * GET /api/users/csv-template
- * Download CSV template for bulk upload
- */
-router.get('/csv-template', (req, res) => {
-  const template = `name,email,password,tier,isFloater,inTraining,isManager,state,preferences
-"John Doe",john.doe@example.com,SecurePass123!,T2,false,false,false,BY,"Early,Morning,Late,Night,WeekendEarly,WeekendMorning,WeekendLate,WeekendNight"
-"Jane Smith",jane.smith@example.com,StrongPass456!,T1,false,true,false,NW,"Early,Morning,WeekendMorning"
-"Bob Manager",bob.manager@example.com,ManagerPass789!,T2,false,false,true,BE,"Late,Night,WeekendLate,WeekendNight"`;
-
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=users-template.csv');
-  res.send(template);
-});
-
-/**
- * GET /api/users/excel-template
- * Download Excel template for bulk upload
- */
-router.get('/excel-template', (req, res) => {
-  const templateData = [
-    {
-      Name: 'John Doe',
-      Email: 'john.doe@example.com',
-      Password: 'SecurePass123!',
-      Tier: 'T2',
-      IsFloater: 'false',
-      InTraining: 'false',
-      IsManager: 'false',
-      State: 'BY',
-      Preferences: 'Early,Morning,Late,Night,WeekendEarly,WeekendMorning,WeekendLate,WeekendNight'
-    },
-    {
-      Name: 'Jane Smith',
-      Email: 'jane.smith@example.com',
-      Password: 'StrongPass456!',
-      Tier: 'T1',
-      IsFloater: 'false',
-      InTraining: 'true',
-      IsManager: 'false',
-      State: 'NW',
-      Preferences: 'Early,Morning,WeekendMorning'
-    }
-  ];
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(templateData);
-  XLSX.utils.book_append_sheet(wb, ws, 'Users');
-
-  const instructions = [
-    ['Shifter for ICES - User Import Template'],
-    [''],
-    ['Instructions:'],
-    ['1. Fill in user data in the Users sheet'],
-    ['2. Required fields: Name, Email, Password'],
-    ['3. Password requirements: Min 10 chars, special character, number'],
-    ['4. Tier: T1, T2, or T3 (default: T2)'],
-    ['5. IsFloater, InTraining, IsManager: true or false'],
-    ['6. State: German state code (BY, NW, BE, etc.)'],
-    [''],
-    ['Valid States:'],
-    ...getAllStates().map(s => [`${s.code}: ${s.name}`])
-  ];
-
-  const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
-  XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instructions');
-
-  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename=users-template.xlsx');
-  res.send(buffer);
-});
-
-/**
- * GET /api/users/export/csv
- * Export all users as CSV
- */
-router.get('/export/csv', authenticate, requireManager, (req, res) => {
-  const users = getAll('users');
-
-  const header = 'name,email,tier,isFloater,inTraining,isManager,isAdmin,state,preferences,isActive';
-  const rows = users.map(u => {
-    const prefs = (u.preferences || []).join(',');
-    return `"${u.name}","${u.email}","${u.tier}","${u.isFloater}","${u.inTraining}","${u.isManager}","${u.isAdmin}","${u.state || ''}","${prefs}","${u.isActive}"`;
-  });
-
-  const csv = [header, ...rows].join('\n');
-
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=users-export.csv');
-  res.send(csv);
-});
-
-/**
- * GET /api/users/export/excel
- * Export all users as Excel
- */
-router.get('/export/excel', authenticate, requireManager, (req, res) => {
-  const users = getAll('users');
-
-  const data = users.map(u => ({
-    Name: u.name,
-    Email: u.email,
-    Tier: u.tier,
-    IsFloater: u.isFloater,
-    InTraining: u.inTraining,
-    IsManager: u.isManager,
-    IsAdmin: u.isAdmin,
-    State: u.state || '',
-    Preferences: (u.preferences || []).join(', '),
-    IsActive: u.isActive,
-    CreatedAt: u.createdAt
-  }));
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(data);
-  XLSX.utils.book_append_sheet(wb, ws, 'Users');
-
-  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename=users-export.xlsx');
-  res.send(buffer);
 });
 
 // ============== Helper Functions ==============

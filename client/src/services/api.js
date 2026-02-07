@@ -168,11 +168,25 @@ class ApiService {
     });
   }
 
+  // Duplicate user
+  async duplicateUser(id) {
+    return this.request(`/users/${id}/duplicate`, {
+      method: 'POST'
+    });
+  }
+
   // User bulk upload
   async bulkUploadUsersExcel(excelData) {
     return this.request('/users/bulk-upload-excel', {
       method: 'POST',
       body: JSON.stringify({ excelData })
+    });
+  }
+
+  async bulkUploadUsersCSV(csvData) {
+    return this.request('/users/bulk-upload', {
+      method: 'POST',
+      body: JSON.stringify({ csvData })
     });
   }
 
@@ -183,6 +197,10 @@ class ApiService {
         'Authorization': `Bearer ${this.getToken()}`
       }
     });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Export failed (${response.status})`);
+    }
     return response.blob();
   }
 
@@ -192,6 +210,10 @@ class ApiService {
         'Authorization': `Bearer ${this.getToken()}`
       }
     });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Export failed (${response.status})`);
+    }
     return response.blob();
   }
 

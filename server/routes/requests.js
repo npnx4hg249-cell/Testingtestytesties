@@ -1,7 +1,7 @@
 /**
  * Request Routes
  *
- * Handles engineer scheduling requests with 15-day lead time requirement.
+ * Handles user scheduling requests with 15-day lead time requirement.
  */
 
 import { Router } from 'express';
@@ -12,7 +12,7 @@ import {
   find,
   createRequest,
   getPendingRequests,
-  getRequestsForEngineer,
+  getRequestsForUser,
   reviewRequest
 } from '../data/store.js';
 import { authenticate, requireManager } from '../middleware/auth.js';
@@ -25,17 +25,17 @@ const MIN_LEAD_TIME_DAYS = 15;
 
 /**
  * GET /api/requests
- * Get all requests (managers see all, engineers see their own)
+ * Get all requests (managers see all, users see their own)
  */
 router.get('/', authenticate, (req, res) => {
   const { status, type } = req.query;
 
   let requests;
 
-  if (req.user.role === 'admin' || req.user.role === 'manager') {
+  if (req.user.isAdmin || req.user.isManager) {
     requests = find('requests', () => true);
   } else {
-    requests = getRequestsForEngineer(req.user.engineerId);
+    requests = getRequestsForUser(req.user.id);
   }
 
   if (status) {
@@ -86,9 +86,9 @@ router.get('/:id', authenticate, (req, res) => {
     });
   }
 
-  // Engineers can only view their own requests
-  if (req.user.role !== 'admin' && req.user.role !== 'manager' &&
-      req.user.engineerId !== request.engineerId) {
+  // Users can only view their own requests
+  if (!req.user.isAdmin && !req.user.isManager &&
+      req.user.id !== request.userId) {
     return res.status(403).json({
       error: 'Access denied'
     });
@@ -112,18 +112,12 @@ router.post('/', authenticate, (req, res) => {
     });
   }
 
-  // Get the engineer making the request
-  const engineerId = req.user.engineerId;
-  if (!engineerId && req.user.role !== 'admin' && req.user.role !== 'manager') {
+  // Get the user making the request
+  const userId = req.user.id;
+  const user = getById('users', userId);
+  if (!user) {
     return res.status(400).json({
-      error: 'Your account is not linked to an engineer profile'
-    });
-  }
-
-  const engineer = getById('engineers', engineerId);
-  if (!engineer) {
-    return res.status(400).json({
-      error: 'Engineer profile not found'
+      error: 'User profile not found'
     });
   }
 
@@ -214,8 +208,8 @@ router.post('/', authenticate, (req, res) => {
 
   // Create the request
   const request = createRequest({
-    engineerId,
-    engineerName: engineer.name,
+    userId,
+    userName: user.name,
     type,
     dates: dates || [],
     details: details || {},
@@ -259,18 +253,18 @@ router.post('/:id/approve', authenticate, requireManager, (req, res) => {
 
   // If it's a preference update, apply it immediately
   if (request.type === 'preference_update' && request.details.preferences) {
-    update('engineers', request.engineerId, {
+    update('users', request.userId, {
       preferences: request.details.preferences
     });
   }
 
-  // If it's a time_off request, add dates to engineer's unavailable days
+  // If it's a time_off request, add dates to user's unavailable days
   if (request.type === 'time_off') {
-    const engineer = getById('engineers', request.engineerId);
-    if (engineer) {
-      const existingUnavailable = engineer.unavailableDays || [];
+    const user = getById('users', request.userId);
+    if (user) {
+      const existingUnavailable = user.unavailableDays || [];
       const newUnavailable = [...new Set([...existingUnavailable, ...request.dates])];
-      update('engineers', request.engineerId, {
+      update('users', request.userId, {
         unavailableDays: newUnavailable
       });
     }
@@ -324,7 +318,7 @@ router.post('/:id/reject', authenticate, requireManager, (req, res) => {
 
 /**
  * DELETE /api/requests/:id
- * Cancel/delete a pending request (only by the engineer who created it)
+ * Cancel/delete a pending request (only by the user who created it)
  */
 router.delete('/:id', authenticate, (req, res) => {
   const request = getById('requests', req.params.id);
@@ -335,9 +329,9 @@ router.delete('/:id', authenticate, (req, res) => {
     });
   }
 
-  // Only the engineer who created it or a manager can delete
-  if (req.user.role !== 'admin' && req.user.role !== 'manager' &&
-      req.user.engineerId !== request.engineerId) {
+  // Only the user who created it or a manager can delete
+  if (!req.user.isAdmin && !req.user.isManager &&
+      req.user.id !== request.userId) {
     return res.status(403).json({
       error: 'You can only cancel your own requests'
     });

@@ -5,7 +5,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths,
 
 function EngineerUnavailability() {
   const { id } = useParams();
-  const [engineer, setEngineer] = useState(null);
+  const [user, setUser] = useState(null);
   const [unavailableDates, setUnavailableDates] = useState([]);
   const [selectedDates, setSelectedDates] = useState(new Set());
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -22,11 +22,11 @@ function EngineerUnavailability() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [engineerData, datesData] = await Promise.all([
-        api.getEngineer(id),
-        api.getEngineerUnavailableDates(id)
+      const [userData, datesData] = await Promise.all([
+        api.getUser(id),
+        api.getUserUnavailableDates(id)
       ]);
-      setEngineer(engineerData);
+      setUser(userData);
       setUnavailableDates(datesData.unavailableDates || []);
     } catch (err) {
       setError(err.message);
@@ -84,7 +84,7 @@ function EngineerUnavailability() {
         notes: ''
       }));
 
-      await api.addEngineerUnavailableDates(id, dates);
+      await api.addUserUnavailableDates(id, dates);
       setSuccess(`Added ${dates.length} unavailable date(s)`);
       setSelectedDates(new Set());
       await loadData();
@@ -102,7 +102,7 @@ function EngineerUnavailability() {
     setSaving(true);
     setError('');
     try {
-      await api.removeEngineerUnavailableDates(id, datesToRemove);
+      await api.removeUserUnavailableDates(id, datesToRemove);
       setSuccess(`Removed ${datesToRemove.length} date(s)`);
       await loadData();
       setTimeout(() => setSuccess(''), 3000);
@@ -230,16 +230,16 @@ function EngineerUnavailability() {
     );
   }
 
-  if (!engineer) {
-    return <div className="alert alert-error">Engineer not found</div>;
+  if (!user) {
+    return <div className="alert alert-error">User not found</div>;
   }
 
   return (
     <div>
-      <Link to="/engineers" style={{ color: '#666', textDecoration: 'none', fontSize: 14 }}>
-        ← Back to Engineers
+      <Link to="/users" style={{ color: '#666', textDecoration: 'none', fontSize: 14 }}>
+        ← Back to Users
       </Link>
-      <h1 style={{ marginTop: 10 }}>Unavailability Calendar: {engineer.name}</h1>
+      <h1 style={{ marginTop: 10 }}>Unavailability Calendar: {user.name}</h1>
 
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
@@ -386,8 +386,8 @@ function EngineerUnavailability() {
           When integrated, unavailable dates will sync automatically via API.
         </p>
         <p style={{ marginTop: 10, fontSize: 13 }}>
-          <strong>Last WFM Sync:</strong> {engineer.lastWFMSync || 'Never'}<br />
-          <strong>WFM Enabled:</strong> {engineer.wfmEnabled ? 'Yes' : 'No'}
+          <strong>Last WFM Sync:</strong> {user.lastWFMSync || 'Never'}<br />
+          <strong>WFM Enabled:</strong> {user.wfmEnabled ? 'Yes' : 'No'}
         </p>
       </div>
     </div>

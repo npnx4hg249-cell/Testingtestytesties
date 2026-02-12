@@ -29,6 +29,8 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 
 ### Core Scheduling
 - **Constraint-based schedule generation** using a constraint solver approach (not greedy heuristics)
+- **Iterative generation** - Tries up to 50 iterations with randomization to find optimal solution
+- **Partial schedule support** - Even if perfect solution not found, returns best result for manual editing
 - Support for multiple shift types: Early, Morning, Late, Night, Training
 - **Weekend-specific shift preferences** (WeekendEarly, WeekendMorning, WeekendLate, WeekendNight)
 - Different coverage requirements for weekdays vs weekends
@@ -68,7 +70,8 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 - **15-day minimum lead time** for all scheduling requests
 - Request types: Time Off, Shift Change, Preference Update
 - Admin/Manager approval workflow with option cards
-- Approved requests automatically applied to schedules
+- **Approved requests automatically update availability** - Time off requests add dates to user's unavailability calendar
+- Approved requests considered during schedule generation
 
 ### Security Features
 - **Strong password requirements**:
@@ -309,11 +312,12 @@ Data is stored in `/app/server/data/storage` inside the API container.
 
 5. **Generate Schedule** (Manager/Admin)
    - Select target month
-   - Run constraint solver
-   - If failures occur:
-     - View partial schedule preview
-     - Choose recovery option OR
-     - Edit manually
+   - Run constraint solver (iterates up to 50 times to find best solution)
+   - If perfect solution not found:
+     - Best partial schedule is returned automatically
+     - View schedule preview with issues highlighted
+     - Choose recovery option (relax constraints, increase floater hours, etc.)
+     - Edit manually to fix remaining issues
    - View shift counts per day
 
 6. **Publish Schedule** (Manager/Admin)
@@ -862,12 +866,15 @@ docker system prune -a
 docker-compose build --no-cache
 ```
 
-**Schedule generation always fails**
-- Ensure you have at least 10 active engineers
-- Check that enough engineers can work Night shifts (minimum 2)
-- Verify engineers have shift preferences set
+**Schedule generation has issues**
+- The scheduler tries up to 50 iterations to find a solution
+- Even if not perfect, the best partial schedule is returned for manual editing
+- Ensure you have at least 10 active users
+- Check that enough users can work Night shifts (minimum 2)
+- Verify users have shift preferences set
 - Review the error messages and use the preview feature
-- Check for too many engineers marked as "In Training"
+- Check for too many users marked as "In Training"
+- Use manual editing to fix remaining issues after generation
 
 **Login issues**
 - Default admin: `admin@example.com` / `Admin123!@#`

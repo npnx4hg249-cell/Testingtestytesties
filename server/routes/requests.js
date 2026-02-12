@@ -262,10 +262,33 @@ router.post('/:id/approve', authenticate, requireManager, (req, res) => {
   if (request.type === 'time_off') {
     const user = getById('users', request.userId);
     if (user) {
+      // Update simple unavailableDays array
       const existingUnavailable = user.unavailableDays || [];
       const newUnavailable = [...new Set([...existingUnavailable, ...request.dates])];
+
+      // Update detailed unavailableDates array
+      const existingDates = user.unavailableDates || [];
+      const newDates = [...existingDates];
+
+      for (const dateStr of request.dates) {
+        const exists = newDates.some(d =>
+          (typeof d === 'string' ? d : d.date) === dateStr
+        );
+        if (!exists) {
+          newDates.push({
+            date: dateStr,
+            type: 'vacation',
+            notes: request.reason || '',
+            source: 'approved_request',
+            requestId: request.id,
+            addedAt: new Date().toISOString()
+          });
+        }
+      }
+
       update('users', request.userId, {
-        unavailableDays: newUnavailable
+        unavailableDays: newUnavailable,
+        unavailableDates: newDates
       });
     }
   }

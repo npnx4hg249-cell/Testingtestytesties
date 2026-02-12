@@ -647,6 +647,138 @@ router.put('/:id/unavailable', authenticate, (req, res) => {
 });
 
 /**
+ * GET /api/users/:id/unavailable-dates
+ * Get user's unavailable dates with details
+ */
+router.get('/:id/unavailable-dates', authenticate, (req, res) => {
+  const isOwn = req.user.id === req.params.id;
+  const isPrivileged = req.user.isAdmin || req.user.isManager;
+
+  if (!isOwn && !isPrivileged) {
+    return res.status(403).json({ error: 'You can only view your own unavailable dates' });
+  }
+
+  const user = getById('users', req.params.id);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  // Return unavailable dates in detailed format
+  const unavailableDates = (user.unavailableDates || []).map(item => {
+    if (typeof item === 'string') {
+      // Legacy format - just date strings
+      return { date: item, type: 'unavailable', notes: '', source: 'manual' };
+    }
+    return item;
+  });
+
+  res.json({ unavailableDates });
+});
+
+/**
+ * POST /api/users/:id/unavailable-dates
+ * Add unavailable dates for a user
+ */
+router.post('/:id/unavailable-dates', authenticate, (req, res) => {
+  const isOwn = req.user.id === req.params.id;
+  const isPrivileged = req.user.isAdmin || req.user.isManager;
+
+  if (!isOwn && !isPrivileged) {
+    return res.status(403).json({ error: 'You can only update your own unavailable dates' });
+  }
+
+  const user = getById('users', req.params.id);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  const { dates } = req.body;
+  if (!dates || !Array.isArray(dates)) {
+    return res.status(400).json({ error: 'dates must be an array' });
+  }
+
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  const existingDates = user.unavailableDates || [];
+  const newDates = [];
+
+  for (const item of dates) {
+    const dateStr = typeof item === 'string' ? item : item.date;
+    if (!dateRegex.test(dateStr)) {
+      return res.status(400).json({ error: `Invalid date format: ${dateStr}` });
+    }
+
+    // Check if date already exists
+    const exists = existingDates.some(d =>
+      (typeof d === 'string' ? d : d.date) === dateStr
+    );
+
+    if (!exists) {
+      newDates.push({
+        date: dateStr,
+        type: item.type || 'unavailable',
+        notes: item.notes || '',
+        source: item.source || 'manual',
+        addedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  const updatedDates = [...existingDates, ...newDates];
+  update('users', req.params.id, { unavailableDates: updatedDates });
+
+  // Also update simple unavailableDays array for backward compatibility
+  const simpleDays = updatedDates.map(d => typeof d === 'string' ? d : d.date);
+  update('users', req.params.id, { unavailableDays: simpleDays });
+
+  res.json({
+    message: `Added ${newDates.length} unavailable date(s)`,
+    added: newDates.length,
+    unavailableDates: updatedDates
+  });
+});
+
+/**
+ * DELETE /api/users/:id/unavailable-dates
+ * Remove unavailable dates for a user
+ */
+router.delete('/:id/unavailable-dates', authenticate, (req, res) => {
+  const isOwn = req.user.id === req.params.id;
+  const isPrivileged = req.user.isAdmin || req.user.isManager;
+
+  if (!isOwn && !isPrivileged) {
+    return res.status(403).json({ error: 'You can only update your own unavailable dates' });
+  }
+
+  const user = getById('users', req.params.id);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  const { dates } = req.body;
+  if (!dates || !Array.isArray(dates)) {
+    return res.status(400).json({ error: 'dates must be an array of date strings' });
+  }
+
+  const existingDates = user.unavailableDates || [];
+  const updatedDates = existingDates.filter(d => {
+    const dateStr = typeof d === 'string' ? d : d.date;
+    return !dates.includes(dateStr);
+  });
+
+  update('users', req.params.id, { unavailableDates: updatedDates });
+
+  // Also update simple unavailableDays array for backward compatibility
+  const simpleDays = updatedDates.map(d => typeof d === 'string' ? d : d.date);
+  update('users', req.params.id, { unavailableDays: simpleDays });
+
+  res.json({
+    message: `Removed ${existingDates.length - updatedDates.length} date(s)`,
+    removed: existingDates.length - updatedDates.length,
+    unavailableDates: updatedDates
+  });
+});
+
+/**
  * GET /api/users/:id/holidays
  * Get holidays for a user based on their state
  */

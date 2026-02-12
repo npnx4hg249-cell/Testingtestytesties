@@ -102,6 +102,21 @@ const SHIFT_CONSISTENCY_GROUPS = {
 // Minimum weeks for night shift consistency
 const NIGHT_CONSISTENCY_WEEKS = 2;
 
+// Maximum iterations for schedule generation
+const MAX_ITERATIONS = 50;
+
+/**
+ * Shuffle array using Fisher-Yates algorithm
+ */
+function shuffleArray(array) {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
 /**
  * Main constraint solver class
  */
@@ -113,6 +128,7 @@ export class ShiftScheduler {
     this.approvedRequests = options.approvedRequests || [];
     this.violations = [];
     this.warnings = [];
+    this.maxIterations = options.maxIterations || MAX_ITERATIONS;
   }
 
   /**
@@ -192,9 +208,9 @@ export class ShiftScheduler {
       return false;
     }
 
-    // Check approved time-off requests
+    // Check approved time-off requests (support both userId and engineerId for compatibility)
     const hasApprovedTimeOff = this.approvedRequests.some(req =>
-      req.engineerId === engineer.id &&
+      (req.userId === engineer.id || req.engineerId === engineer.id) &&
       req.type === 'time_off' &&
       req.dates.includes(dateStr)
     );
@@ -352,17 +368,101 @@ export class ShiftScheduler {
   }
 
   /**
-   * Main solving function
+   * Main solving function - uses iterative approach
+   * Tries up to maxIterations times, returning the best result found
    */
   solve() {
+    let bestResult = null;
+    let bestErrorCount = Infinity;
+    let iterationResults = [];
+
+    console.log(`Starting iterative schedule generation (max ${this.maxIterations} iterations)`);
+
+    for (let iteration = 1; iteration <= this.maxIterations; iteration++) {
+      const result = this.solveSingleIteration(iteration);
+
+      // Count total errors
+      const errorCount = result.errors ? result.errors.length : 0;
+
+      iterationResults.push({
+        iteration,
+        errorCount,
+        success: result.success
+      });
+
+      // If perfect solution found, return immediately
+      if (result.success && errorCount === 0) {
+        console.log(`Perfect schedule found on iteration ${iteration}`);
+        return {
+          ...result,
+          iterations: iteration,
+          iterationHistory: iterationResults
+        };
+      }
+
+      // Track best result
+      if (errorCount < bestErrorCount) {
+        bestErrorCount = errorCount;
+        bestResult = result;
+        console.log(`Iteration ${iteration}: New best with ${errorCount} errors`);
+      } else {
+        console.log(`Iteration ${iteration}: ${errorCount} errors (best: ${bestErrorCount})`);
+      }
+
+      // If we found a result with very few errors, we can stop early
+      if (bestErrorCount <= 2 && iteration >= 5) {
+        console.log(`Stopping early with ${bestErrorCount} errors after ${iteration} iterations`);
+        break;
+      }
+    }
+
+    // Return the best result found, even if it has errors
+    if (bestResult) {
+      const finalResult = {
+        ...bestResult,
+        iterations: iterationResults.length,
+        iterationHistory: iterationResults,
+        bestErrorCount,
+        partialSuccess: bestErrorCount > 0,
+        canManualEdit: true
+      };
+
+      // If there are errors, include recovery options
+      if (bestErrorCount > 0 && bestResult.errors) {
+        finalResult.options = this.generateRecoveryOptions(bestResult.errors);
+        finalResult.message = `Best schedule found after ${iterationResults.length} iterations with ${bestErrorCount} issues. Manual editing available.`;
+      }
+
+      return finalResult;
+    }
+
+    // Fallback - should not reach here
+    return this.handleFailure([{
+      type: 'generation_failed',
+      message: 'Failed to generate any schedule after all iterations'
+    }], this.initializeSchedule());
+  }
+
+  /**
+   * Single iteration of the solving algorithm with randomization
+   */
+  solveSingleIteration(iteration = 1) {
     this.violations = [];
     this.warnings = [];
 
     // Separate engineers by type
     const trainingEngineers = this.engineers.filter(e => e.inTraining);
     const regularEngineers = this.engineers.filter(e => !e.inTraining);
-    const coreEngineers = regularEngineers.filter(e => !e.isFloater);
-    const floaters = regularEngineers.filter(e => e.isFloater);
+
+    // Shuffle core engineers for different orderings each iteration
+    let coreEngineers = regularEngineers.filter(e => !e.isFloater);
+    let floaters = regularEngineers.filter(e => e.isFloater);
+
+    // Add randomization after first iteration
+    if (iteration > 1) {
+      coreEngineers = shuffleArray(coreEngineers);
+      floaters = shuffleArray(floaters);
+    }
 
     if (floaters.length > 2) {
       this.violations.push({
@@ -373,6 +473,7 @@ export class ShiftScheduler {
 
     const days = this.getMonthDays();
     const weeks = this.getWeeks();
+    let allErrors = [];
 
     // Initialize schedule
     let schedule = this.initializeSchedule();
@@ -383,24 +484,24 @@ export class ShiftScheduler {
 
     // Step 1: Assign night shifts first (need continuity)
     const nightResult = this.assignNightShifts(schedule, coreEngineers, days, weeks);
-    if (!nightResult.success) {
-      return this.handleFailure(nightResult.errors, schedule);
-    }
     schedule = nightResult.schedule;
-
-    // Step 2: Assign day shifts for core engineers
-    const dayResult = this.assignDayShifts(schedule, coreEngineers, days, weeks);
-    if (!dayResult.success) {
-      return this.handleFailure(dayResult.errors, schedule);
+    if (nightResult.errors) {
+      allErrors.push(...nightResult.errors);
     }
+
+    // Step 2: Assign day shifts for core engineers (continue even with errors)
+    const dayResult = this.assignDayShifts(schedule, coreEngineers, days, weeks);
     schedule = dayResult.schedule;
+    if (dayResult.errors) {
+      allErrors.push(...dayResult.errors);
+    }
 
     // Step 3: Assign OFF days
     const offResult = this.assignOffDays(schedule, coreEngineers, days, weeks);
-    if (!offResult.success) {
-      return this.handleFailure(offResult.errors, schedule);
-    }
     schedule = offResult.schedule;
+    if (offResult.errors) {
+      allErrors.push(...offResult.errors);
+    }
 
     // Step 4: Add floaters where beneficial
     const floaterResult = this.assignFloaters(schedule, floaters, days, weeks);
@@ -409,18 +510,83 @@ export class ShiftScheduler {
       this.warnings.push(...floaterResult.warnings);
     }
 
-    // Step 5: Validate final schedule
+    // Step 5: Fill any remaining gaps
+    schedule = this.fillRemainingGaps(schedule, coreEngineers, days);
+
+    // Step 6: Validate final schedule
     const validation = this.validateSchedule(schedule, days, weeks);
-    if (!validation.valid) {
-      return this.handleFailure(validation.errors, schedule);
+    if (validation.errors) {
+      // Add only new unique errors
+      for (const error of validation.errors) {
+        const isDuplicate = allErrors.some(e =>
+          e.type === error.type && e.date === error.date && e.shift === error.shift
+        );
+        if (!isDuplicate) {
+          allErrors.push(error);
+        }
+      }
     }
 
+    const success = allErrors.length === 0;
+
     return {
-      success: true,
+      success,
       schedule,
+      errors: allErrors,
       warnings: this.warnings,
       stats: this.calculateStats(schedule, days, weeks)
     };
+  }
+
+  /**
+   * Fill any remaining null slots in the schedule
+   */
+  fillRemainingGaps(schedule, engineers, days) {
+    const dayShifts = [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE];
+
+    for (const engineer of engineers) {
+      for (const day of days) {
+        const dateStr = format(day, 'yyyy-MM-dd');
+
+        // If slot is still null, assign something
+        if (schedule[engineer.id][dateStr] === null) {
+          // Try to assign a valid shift based on preferences and transitions
+          const prevDay = addDays(day, -1);
+          const prevDateStr = format(prevDay, 'yyyy-MM-dd');
+          const prevShift = schedule[engineer.id][prevDateStr];
+
+          // Check consecutive work days
+          const consecutive = this.getConsecutiveWorkDays(schedule, engineer.id, prevDay, days);
+
+          if (consecutive >= 5) {
+            // Need an OFF day
+            schedule[engineer.id][dateStr] = SHIFTS.OFF;
+          } else {
+            // Try to assign a valid shift
+            let assigned = false;
+
+            // Shuffle shifts for variety
+            const shuffledShifts = shuffleArray(dayShifts);
+
+            for (const shift of shuffledShifts) {
+              if (this.canWorkShift(engineer, shift, day) &&
+                  this.isValidTransition(prevShift, shift)) {
+                schedule[engineer.id][dateStr] = shift;
+                assigned = true;
+                break;
+              }
+            }
+
+            // If nothing worked, assign OFF
+            if (!assigned) {
+              schedule[engineer.id][dateStr] = SHIFTS.OFF;
+            }
+          }
+        }
+      }
+    }
+
+    return schedule;
   }
 
   /**

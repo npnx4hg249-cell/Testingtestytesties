@@ -35,7 +35,7 @@ const ENGINEER_VIEW_MONTHS = 3;
  */
 router.get('/', authenticate, (req, res) => {
   const { year, month, status, archived } = req.query;
-  const isManager = req.user.role === 'admin' || req.user.role === 'manager';
+  const isManager = req.user.isAdmin || req.user.isManager;
 
   let schedules = getAll('schedules');
 
@@ -79,6 +79,89 @@ router.get('/', authenticate, (req, res) => {
     publishedAt: s.publishedAt,
     hasErrors: !!(s.validationErrors?.length > 0),
     isPartial: s.isPartial || false
+  })));
+});
+
+/**
+ * GET /api/schedules/latest-published
+ * Get the most recent published schedule (for dashboard)
+ * IMPORTANT: Must be defined BEFORE /:id to avoid route shadowing
+ */
+router.get('/latest-published', authenticate, (req, res) => {
+  const schedules = getAll('schedules')
+    .filter(s => s.status === 'published')
+    .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+
+  if (schedules.length === 0) {
+    return res.status(404).json({
+      error: 'No published schedules found'
+    });
+  }
+
+  const schedule = schedules[0];
+  const engineers = getActiveEngineers();
+  const year = parseInt(schedule.month.split('-')[0]);
+  const month = parseInt(schedule.month.split('-')[1]);
+  const monthDate = new Date(year, month - 1, 1);
+
+  const days = eachDayOfInterval({
+    start: startOfMonth(monthDate),
+    end: endOfMonth(monthDate)
+  });
+
+  const exportData = {
+    id: schedule.id,
+    month: schedule.month,
+    publishedAt: schedule.publishedAt,
+    days: days.map(d => ({
+      date: format(d, 'yyyy-MM-dd'),
+      dayOfWeek: format(d, 'EEE'),
+      dayNumber: format(d, 'd')
+    })),
+    engineers: engineers.map(e => ({
+      id: e.id,
+      name: e.name,
+      tier: e.tier,
+      isFloater: e.isFloater,
+      inTraining: e.inTraining || false,
+      tierColor: COLORS.tier[e.tier],
+      shifts: days.map(d => {
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const shift = schedule.data[e.id]?.[dateStr];
+        return {
+          date: dateStr,
+          shift: shift || null,
+          color: shift ? COLORS.shift[shift] : null
+        };
+      })
+    })),
+    colors: COLORS,
+    stats: schedule.stats
+  };
+
+  res.json(exportData);
+});
+
+/**
+ * GET /api/schedules/archived
+ * Get archived schedules (admin only - full 24 month history)
+ * IMPORTANT: Must be defined BEFORE /:id to avoid route shadowing
+ */
+router.get('/archived', authenticate, requireManager, (req, res) => {
+  const cutoffDate = subMonths(new Date(), ARCHIVE_RETENTION_MONTHS);
+  const cutoffMonth = format(cutoffDate, 'yyyy-MM');
+
+  let schedules = getAll('schedules')
+    .filter(s => s.status === 'archived' && s.month >= cutoffMonth)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  res.json(schedules.map(s => ({
+    id: s.id,
+    month: s.month,
+    status: s.status,
+    createdAt: s.createdAt,
+    publishedAt: s.publishedAt,
+    archivedAt: s.archivedAt
   })));
 });
 
@@ -128,8 +211,22 @@ router.get('/month/:year/:month', authenticate, (req, res) => {
 });
 
 /**
+ * Fisher-Yates shuffle for randomizing engineer order between iterations
+ */
+function shuffleArray(arr) {
+  const result = [...arr];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+const MAX_GENERATE_ITERATIONS = 100;
+
+/**
  * POST /api/schedules/generate
- * Generate a new schedule
+ * Generate a new schedule - iterates up to 100 times to find the best solution
  */
 router.post('/generate', authenticate, requireManager, (req, res) => {
   const { year, month, options = {} } = req.body;
@@ -161,63 +258,78 @@ router.post('/generate', authenticate, requireManager, (req, res) => {
   // Create the date for the month
   const monthDate = new Date(year, month - 1, 1);
 
-  // Create scheduler
-  const scheduler = new Scheduler({
-    engineers,
-    month: monthDate,
-    holidays,
-    approvedRequests
+  // Iterative generation - try up to MAX_GENERATE_ITERATIONS times with shuffled engineers
+  let bestResult = null;
+  let bestErrorCount = Infinity;
+
+  for (let iteration = 0; iteration < MAX_GENERATE_ITERATIONS; iteration++) {
+    // Shuffle engineers on each iteration after the first for randomized constraint solving
+    const iterEngineers = iteration === 0 ? engineers : shuffleArray(engineers);
+
+    const scheduler = new Scheduler({
+      engineers: iterEngineers,
+      month: monthDate,
+      holidays,
+      approvedRequests
+    });
+
+    const result = scheduler.solve();
+
+    if (result.success) {
+      // Perfect solution found - save and return immediately
+      const schedule = createSchedule({
+        month: `${year}-${month.toString().padStart(2, '0')}`,
+        year,
+        data: result.schedule,
+        stats: result.stats,
+        createdBy: req.user.id
+      });
+
+      return res.status(201).json({
+        success: true,
+        schedule,
+        warnings: result.warnings,
+        stats: result.stats,
+        iterations: iteration + 1
+      });
+    }
+
+    const errorCount = result.errors ? result.errors.length : Infinity;
+    if (errorCount < bestErrorCount) {
+      bestErrorCount = errorCount;
+      bestResult = { ...result, iterations: iteration + 1 };
+    }
+
+    // Early stop if we found a very good solution after several attempts
+    if (iteration >= 5 && bestErrorCount <= 2) break;
+  }
+
+  // No perfect solution found - save best partial schedule for manual editing
+  const scheduleData = bestResult.schedule || bestResult.partialSchedule || {};
+  const partialSchedule = createSchedule({
+    month: `${year}-${month.toString().padStart(2, '0')}`,
+    year,
+    data: scheduleData,
+    stats: bestResult.stats || null,
+    createdBy: req.user.id,
+    status: 'draft',
+    isPartial: true,
+    generationErrors: bestResult.errors,
+    validationErrors: bestResult.errors
   });
 
-  // Attempt to solve
-  const result = scheduler.solve();
-
-  if (result.success) {
-    // Create schedule record
-    const schedule = createSchedule({
-      month: `${year}-${month.toString().padStart(2, '0')}`,
-      year,
-      data: result.schedule,
-      stats: result.stats,
-      createdBy: req.user.id
-    });
-
-    return res.status(201).json({
-      success: true,
-      schedule,
-      warnings: result.warnings,
-      stats: result.stats
-    });
-  } else {
-    // Save partial schedule as draft for preview and manual editing
-    // Use schedule or partialSchedule (they should be the same)
-    const scheduleData = result.schedule || result.partialSchedule || {};
-    const partialSchedule = createSchedule({
-      month: `${year}-${month.toString().padStart(2, '0')}`,
-      year,
-      data: scheduleData,
-      stats: result.stats || null,
-      createdBy: req.user.id,
-      status: 'draft',
-      isPartial: true,
-      generationErrors: result.errors,
-      validationErrors: result.errors
-    });
-
-    // Return with partial success - schedule is saved and can be edited
-    return res.status(200).json({
-      success: false,
-      partialSuccess: true,
-      errors: result.errors,
-      options: result.options,
-      schedule: partialSchedule,
-      partialSchedule: partialSchedule,
-      canManualEdit: true,
-      iterations: result.iterations || 1,
-      bestErrorCount: result.bestErrorCount || (result.errors ? result.errors.length : 0),
-      message: result.message || 'Schedule generated with issues. Review and edit manually or use recovery options.'
-    });
-  }
+  return res.status(200).json({
+    success: false,
+    partialSuccess: true,
+    errors: bestResult.errors,
+    options: bestResult.options,
+    schedule: partialSchedule,
+    partialSchedule: partialSchedule,
+    canManualEdit: true,
+    iterations: bestResult.iterations || MAX_GENERATE_ITERATIONS,
+    bestErrorCount,
+    message: `Schedule generated with ${bestErrorCount} issue(s) after ${bestResult.iterations || MAX_GENERATE_ITERATIONS} attempts. Review and edit manually or use recovery options.`
+  });
 });
 
 /**
@@ -259,61 +371,79 @@ router.post('/generate-with-option', authenticate, requireManager, (req, res) =>
       });
   }
 
-  // Create scheduler with modified options
-  const scheduler = new Scheduler({
-    engineers,
-    month: monthDate,
-    holidays,
-    approvedRequests,
-    ...modifiedOptions
+  // Iterative generation with the modified options
+  let bestResult = null;
+  let bestErrorCount = Infinity;
+
+  for (let iteration = 0; iteration < MAX_GENERATE_ITERATIONS; iteration++) {
+    const iterEngineers = iteration === 0 ? engineers : shuffleArray(engineers);
+
+    const scheduler = new Scheduler({
+      engineers: iterEngineers,
+      month: monthDate,
+      holidays,
+      approvedRequests,
+      ...modifiedOptions
+    });
+
+    const result = scheduler.solve();
+
+    if (result.success) {
+      const schedule = createSchedule({
+        month: `${year}-${month.toString().padStart(2, '0')}`,
+        year,
+        data: result.schedule,
+        stats: result.stats,
+        createdBy: req.user.id,
+        appliedOptions: [optionId]
+      });
+
+      return res.status(201).json({
+        success: true,
+        schedule,
+        warnings: result.warnings,
+        stats: result.stats,
+        appliedOption: optionId,
+        iterations: iteration + 1
+      });
+    }
+
+    const errorCount = result.errors ? result.errors.length : Infinity;
+    if (errorCount < bestErrorCount) {
+      bestErrorCount = errorCount;
+      bestResult = { ...result, iterations: iteration + 1 };
+    }
+
+    if (iteration >= 5 && bestErrorCount <= 2) break;
+  }
+
+  // Save best partial schedule for manual editing
+  const scheduleData = bestResult.schedule || bestResult.partialSchedule || {};
+  const partialSchedule = createSchedule({
+    month: `${year}-${month.toString().padStart(2, '0')}`,
+    year,
+    data: scheduleData,
+    stats: bestResult.stats || null,
+    createdBy: req.user.id,
+    status: 'draft',
+    isPartial: true,
+    appliedOptions: [optionId],
+    generationErrors: bestResult.errors
   });
 
-  const result = scheduler.solve();
-
-  if (result.success) {
-    const schedule = createSchedule({
-      month: `${year}-${month.toString().padStart(2, '0')}`,
-      year,
-      data: result.schedule,
-      stats: result.stats,
-      createdBy: req.user.id,
-      appliedOptions: [optionId]
-    });
-
-    return res.status(201).json({
-      success: true,
-      schedule,
-      warnings: result.warnings,
-      stats: result.stats,
-      appliedOption: optionId
-    });
-  } else {
-    // Save partial schedule even with errors for manual editing
-    const scheduleData = result.schedule || result.partialSchedule || {};
-    const partialSchedule = createSchedule({
-      month: `${year}-${month.toString().padStart(2, '0')}`,
-      year,
-      data: scheduleData,
-      stats: result.stats || null,
-      createdBy: req.user.id,
-      status: 'draft',
-      isPartial: true,
-      appliedOptions: [optionId],
-      generationErrors: result.errors
-    });
-
-    return res.status(200).json({
-      success: false,
-      partialSuccess: true,
-      errors: result.errors,
-      options: result.options,
-      schedule: partialSchedule,
-      partialSchedule: partialSchedule,
-      canManualEdit: true,
-      appliedOption: optionId,
-      message: 'Schedule generated with issues even with option applied. Review and edit manually.'
-    });
-  }
+  return res.status(200).json({
+    success: false,
+    partialSuccess: true,
+    errors: bestResult.errors,
+    options: bestResult.options,
+    schedule: partialSchedule,
+    partialSchedule: partialSchedule,
+    canManualEdit: true,
+    appliedOption: optionId,
+    iterations: bestResult.iterations || MAX_GENERATE_ITERATIONS,
+    bestErrorCount,
+    message: `Schedule generated with ${bestErrorCount} issue(s) after ${bestResult.iterations || MAX_GENERATE_ITERATIONS} attempts. Review and edit manually.`
+  });
 });
 
 /**
@@ -422,65 +552,6 @@ router.delete('/:id', authenticate, requireManager, (req, res) => {
   });
 });
 
-/**
- * GET /api/schedules/latest-published
- * Get the most recent published schedule (for dashboard)
- */
-router.get('/latest-published', authenticate, (req, res) => {
-  const schedules = getAll('schedules')
-    .filter(s => s.status === 'published')
-    .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-
-  if (schedules.length === 0) {
-    return res.status(404).json({
-      error: 'No published schedules found'
-    });
-  }
-
-  const schedule = schedules[0];
-  const engineers = getActiveEngineers();
-  const year = parseInt(schedule.month.split('-')[0]);
-  const month = parseInt(schedule.month.split('-')[1]);
-  const monthDate = new Date(year, month - 1, 1);
-
-  const days = eachDayOfInterval({
-    start: startOfMonth(monthDate),
-    end: endOfMonth(monthDate)
-  });
-
-  // Build summary for dashboard
-  const exportData = {
-    id: schedule.id,
-    month: schedule.month,
-    publishedAt: schedule.publishedAt,
-    days: days.map(d => ({
-      date: format(d, 'yyyy-MM-dd'),
-      dayOfWeek: format(d, 'EEE'),
-      dayNumber: format(d, 'd')
-    })),
-    engineers: engineers.map(e => ({
-      id: e.id,
-      name: e.name,
-      tier: e.tier,
-      isFloater: e.isFloater,
-      inTraining: e.inTraining || false,
-      tierColor: COLORS.tier[e.tier],
-      shifts: days.map(d => {
-        const dateStr = format(d, 'yyyy-MM-dd');
-        const shift = schedule.data[e.id]?.[dateStr];
-        return {
-          date: dateStr,
-          shift: shift || null,
-          color: shift ? COLORS.shift[shift] : null
-        };
-      })
-    })),
-    colors: COLORS,
-    stats: schedule.stats
-  };
-
-  res.json(exportData);
-});
 
 /**
  * POST /api/schedules/:id/publish
@@ -609,27 +680,6 @@ router.get('/holidays/:year/:month', authenticate, (req, res) => {
   });
 });
 
-/**
- * GET /api/schedules/archived
- * Get archived schedules (admin only - full 24 month history)
- */
-router.get('/archived', authenticate, requireManager, (req, res) => {
-  const cutoffDate = subMonths(new Date(), ARCHIVE_RETENTION_MONTHS);
-  const cutoffMonth = format(cutoffDate, 'yyyy-MM');
-
-  let schedules = getAll('schedules')
-    .filter(s => s.status === 'archived' && s.month >= cutoffMonth)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-  res.json(schedules.map(s => ({
-    id: s.id,
-    month: s.month,
-    status: s.status,
-    createdAt: s.createdAt,
-    publishedAt: s.publishedAt,
-    archivedAt: s.archivedAt
-  })));
-});
 
 /**
  * POST /api/schedules/:id/archive
@@ -766,7 +816,7 @@ router.get('/engineer-view/:year/:month', authenticate, (req, res) => {
   }
 
   // Check if user is engineer and within view window
-  const isManager = req.user.role === 'admin' || req.user.role === 'manager';
+  const isManager = req.user.isAdmin || req.user.isManager;
 
   if (!isManager) {
     const cutoffDate = subMonths(new Date(), ENGINEER_VIEW_MONTHS);

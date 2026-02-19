@@ -87,25 +87,23 @@ function ScheduleView() {
           </h1>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          <Link
+            to={`/schedules/${id}/edit`}
+            className="btn btn-outline"
+            style={{ textDecoration: 'none' }}
+          >
+            Edit Schedule
+          </Link>
           {schedule.status === 'draft' && (
-            <>
-              <Link
-                to={`/schedules/${id}/edit`}
-                className="btn btn-outline"
-                style={{ textDecoration: 'none' }}
-              >
-                Edit Schedule
-              </Link>
-              <button
-                className="btn btn-success"
-                onClick={async () => {
-                  await api.publishSchedule(id);
-                  loadSchedule();
-                }}
-              >
-                Publish Schedule
-              </button>
-            </>
+            <button
+              className="btn btn-success"
+              onClick={async () => {
+                await api.publishSchedule(id);
+                loadSchedule();
+              }}
+            >
+              Publish Schedule
+            </button>
           )}
         </div>
       </div>
@@ -114,7 +112,7 @@ function ScheduleView() {
       {exportData?.stats && (
         <div className="stats-grid" style={{ marginBottom: 20 }}>
           <div className="stat-box">
-            <h3>Total Engineers</h3>
+            <h3>Total Users</h3>
             <div className="value">{exportData.engineers?.length || 0}</div>
           </div>
           <div className="stat-box">
@@ -155,7 +153,7 @@ function ScheduleView() {
             <table className="schedule-table">
               <thead>
                 <tr>
-                  <th className="engineer-name">Engineer</th>
+                  <th className="engineer-name">User</th>
                   {exportData.days.map(day => {
                     const holiday = isHoliday(day.date);
                     const weekend = isWeekend(day.dayOfWeek);
@@ -222,16 +220,16 @@ function ScheduleView() {
         </div>
       </div>
 
-      {/* Engineer Stats */}
+      {/* User Stats */}
       {exportData?.stats?.engineerStats && (
         <div className="card" style={{ marginTop: 20 }}>
           <div className="card-header">
-            <h2>Engineer Statistics</h2>
+            <h2>User Statistics</h2>
           </div>
           <table className="data-table">
             <thead>
               <tr>
-                <th>Engineer</th>
+                <th>User</th>
                 <th>Total Shifts</th>
                 <th>Early</th>
                 <th>Morning</th>

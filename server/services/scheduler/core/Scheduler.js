@@ -489,11 +489,36 @@ export class Scheduler {
   }
 
   /**
+   * Fill any remaining null slots with OFF to ensure a complete schedule
+   * A null slot means the position was never assigned - default to OFF
+   */
+  fillNullSlots(schedule) {
+    const days = this.getDays();
+    const filled = {};
+
+    for (const engineer of this.engineers) {
+      filled[engineer.id] = { ...(schedule[engineer.id] || {}) };
+      for (const day of days) {
+        const dateStr = toDateString(day);
+        if (filled[engineer.id][dateStr] === null || filled[engineer.id][dateStr] === undefined) {
+          filled[engineer.id][dateStr] = SHIFTS.OFF;
+        }
+      }
+    }
+
+    return filled;
+  }
+
+  /**
    * Main solve function
+   * Always produces a complete schedule, even if constraints are violated.
+   * Returns success:true if no errors, success:false with errors and the
+   * best-available schedule if constraints could not be fully satisfied.
    */
   solve() {
     this.violations = [];
     this.warnings = [];
+    const collectedErrors = [];
 
     const days = this.getDays();
     const weeks = this.getWeeksInMonth();
@@ -517,19 +542,25 @@ export class Scheduler {
     schedule = this.assignTrainingShifts(schedule);
 
     // Step 3: Assign night shifts (need continuity)
+    // Continue even on failure - collect errors and use whatever was produced
     const nightResult = this.nightStrategy.execute(schedule, coreEngineers, days, weeks);
-    if (!nightResult.success) {
-      return this.handleFailure(nightResult.errors, schedule);
+    if (nightResult.schedule) {
+      schedule = nightResult.schedule;
     }
-    schedule = nightResult.schedule;
+    if (!nightResult.success) {
+      collectedErrors.push(...(nightResult.errors || []));
+    }
     this.warnings.push(...(nightResult.warnings || []));
 
     // Step 4: Assign day shifts
+    // Continue even on failure - collect errors and use whatever was produced
     const dayResult = this.dayStrategy.execute(schedule, coreEngineers, days, weeks);
-    if (!dayResult.success) {
-      return this.handleFailure(dayResult.errors, schedule);
+    if (dayResult.schedule) {
+      schedule = dayResult.schedule;
     }
-    schedule = dayResult.schedule;
+    if (!dayResult.success) {
+      collectedErrors.push(...(dayResult.errors || []));
+    }
     this.warnings.push(...(dayResult.warnings || []));
 
     // Step 5: Assign OFF days
@@ -544,47 +575,54 @@ export class Scheduler {
     schedule = floaterResult.schedule;
     this.warnings.push(...(floaterResult.warnings || []));
 
-    // Step 7: Validate final schedule
+    // Step 7: Fill any remaining null slots with OFF
+    schedule = this.fillNullSlots(schedule);
+
+    // Step 8: Validate final schedule
     const validation = this.validateSchedule(schedule);
-    if (!validation.valid) {
-      // Check for critical errors (German labor law violations)
-      const criticalErrors = validation.errors.filter(e =>
-        e.type === 'ARBZG_CONSECUTIVE_DAYS' ||
-        e.type === 'ARBZG_REST_PERIOD' ||
-        e.type === 'transition_violation'
-      );
-
-      if (criticalErrors.length > 0) {
-        return this.handleFailure(criticalErrors, schedule);
-      }
-
-      // Non-critical errors become warnings
-      this.warnings.push(...validation.errors);
-    }
+    const allErrors = [...collectedErrors, ...(validation.valid ? [] : validation.errors)];
 
     // Calculate stats
     this.stats = this.calculateStats(schedule);
 
+    if (allErrors.length === 0) {
+      return {
+        success: true,
+        schedule,
+        warnings: this.warnings,
+        stats: this.stats,
+        version: '2.0.0'
+      };
+    }
+
+    // Return complete schedule with errors for manual review/editing
+    const options = this.generateRecoveryOptions(allErrors);
     return {
-      success: true,
+      success: false,
+      errors: allErrors,
       schedule,
+      partialSchedule: schedule,
+      options,
       warnings: this.warnings,
       stats: this.stats,
+      canManualEdit: true,
       version: '2.0.0'
     };
   }
 
   /**
-   * Handle failure with recovery options
+   * Handle failure with recovery options (kept for backward compatibility)
    */
   handleFailure(errors, partialSchedule) {
+    const filledSchedule = this.fillNullSlots(partialSchedule);
     const options = this.generateRecoveryOptions(errors);
-    this.stats = this.calculateStats(partialSchedule);
+    this.stats = this.calculateStats(filledSchedule);
 
     return {
       success: false,
       errors,
-      partialSchedule,
+      schedule: filledSchedule,
+      partialSchedule: filledSchedule,
       options,
       warnings: this.warnings,
       stats: this.stats,

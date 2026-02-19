@@ -153,7 +153,7 @@ function Schedules() {
   };
 
   const handlePublish = async (id) => {
-    if (!confirm('Are you sure you want to publish this schedule? This will make it visible to all engineers.')) return;
+    if (!confirm('Are you sure you want to publish this schedule? This will make it visible to all users.')) return;
 
     try {
       await api.publishSchedule(id);

@@ -304,7 +304,7 @@ router.put('/users/:id/notifications', authenticate, (req, res) => {
   const userId = req.params.id;
 
   // Users can only update their own notifications unless admin
-  if (req.user.id !== userId && req.user.role !== 'admin') {
+  if (req.user.id !== userId && !req.user.isAdmin) {
     return res.status(403).json({ error: 'Cannot update other users notification settings' });
   }
 

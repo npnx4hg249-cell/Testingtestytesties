@@ -172,7 +172,7 @@ function ScheduleEdit() {
             <button
               className="btn btn-success"
               onClick={async () => {
-                if (confirm('Publish this schedule? It will be visible to all engineers.')) {
+                if (confirm('Publish this schedule? It will be visible to all users.')) {
                   await api.publishSchedule(id);
                   navigate(`/schedules/${id}`);
                 }
@@ -190,7 +190,7 @@ function ScheduleEdit() {
       {/* Published schedule warning */}
       {schedule.status === 'published' && (
         <div className="alert alert-warning" style={{ marginBottom: 20 }}>
-          <strong>Note:</strong> This schedule is published. Changes will be visible to engineers and notifications will be sent.
+          <strong>Note:</strong> This schedule is published. Changes will be visible to all users and notifications will be sent.
         </div>
       )}
 
@@ -212,7 +212,7 @@ function ScheduleEdit() {
       <div className="card" style={{ marginBottom: 20 }}>
         <p style={{ margin: 0 }}>
           <strong>Click any cell</strong> to change the shift assignment.
-          The count row shows how many engineers are assigned to each shift per day.
+          The count row shows how many users are assigned to each shift per day.
         </p>
       </div>
 
@@ -223,7 +223,7 @@ function ScheduleEdit() {
             <table className="schedule-table">
               <thead>
                 <tr>
-                  <th className="engineer-name">Engineer</th>
+                  <th className="engineer-name">User</th>
                   {exportData.days.map(day => {
                     const holiday = isHoliday(day.date);
                     const weekend = isWeekend(day.dayOfWeek);
@@ -320,7 +320,7 @@ function ScheduleEdit() {
             <div className="modal-body">
               <p>
                 <strong>Date:</strong> {selectedCell.date}<br />
-                <strong>Engineer:</strong> {exportData?.engineers.find(e => e.id === selectedCell.engineerId)?.name}<br />
+                <strong>User:</strong> {exportData?.engineers.find(e => e.id === selectedCell.engineerId)?.name}<br />
                 <strong>Current:</strong> {selectedCell.currentShift || 'None'}
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 15 }}>

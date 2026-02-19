@@ -190,26 +190,32 @@ router.post('/generate', authenticate, requireManager, (req, res) => {
     });
   } else {
     // Save partial schedule as draft for preview and manual editing
-    const partialScheduleData = result.partialSchedule || {};
+    // Use schedule or partialSchedule (they should be the same)
+    const scheduleData = result.schedule || result.partialSchedule || {};
     const partialSchedule = createSchedule({
       month: `${year}-${month.toString().padStart(2, '0')}`,
       year,
-      data: partialScheduleData,
+      data: scheduleData,
       stats: result.stats || null,
       createdBy: req.user.id,
+      status: 'draft',
       isPartial: true,
       generationErrors: result.errors,
       validationErrors: result.errors
     });
 
-    // Return failure with options AND the saved partial schedule
-    return res.status(422).json({
+    // Return with partial success - schedule is saved and can be edited
+    return res.status(200).json({
       success: false,
+      partialSuccess: true,
       errors: result.errors,
       options: result.options,
+      schedule: partialSchedule,
       partialSchedule: partialSchedule,
       canManualEdit: true,
-      message: 'Schedule generation failed. Review the preview and use recovery options or manual editing.'
+      iterations: result.iterations || 1,
+      bestErrorCount: result.bestErrorCount || (result.errors ? result.errors.length : 0),
+      message: result.message || 'Schedule generated with issues. Review and edit manually or use recovery options.'
     });
   }
 });
@@ -282,11 +288,30 @@ router.post('/generate-with-option', authenticate, requireManager, (req, res) =>
       appliedOption: optionId
     });
   } else {
-    return res.status(422).json({
+    // Save partial schedule even with errors for manual editing
+    const scheduleData = result.schedule || result.partialSchedule || {};
+    const partialSchedule = createSchedule({
+      month: `${year}-${month.toString().padStart(2, '0')}`,
+      year,
+      data: scheduleData,
+      stats: result.stats || null,
+      createdBy: req.user.id,
+      status: 'draft',
+      isPartial: true,
+      appliedOptions: [optionId],
+      generationErrors: result.errors
+    });
+
+    return res.status(200).json({
       success: false,
+      partialSuccess: true,
       errors: result.errors,
       options: result.options,
-      message: 'Schedule generation still failed even with the option applied.'
+      schedule: partialSchedule,
+      partialSchedule: partialSchedule,
+      canManualEdit: true,
+      appliedOption: optionId,
+      message: 'Schedule generated with issues even with option applied. Review and edit manually.'
     });
   }
 });
@@ -361,7 +386,8 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
 
 /**
  * DELETE /api/schedules/:id
- * Delete an unpublished schedule
+ * Delete a schedule (draft or published)
+ * Published schedules are archived to preserve history
  */
 router.delete('/:id', authenticate, requireManager, (req, res) => {
   const schedule = getById('schedules', req.params.id);
@@ -372,12 +398,22 @@ router.delete('/:id', authenticate, requireManager, (req, res) => {
     });
   }
 
+  // If published, archive it to preserve history
   if (schedule.status === 'published') {
-    return res.status(400).json({
-      error: 'Cannot delete a published schedule. Archive it instead.'
+    update('schedules', req.params.id, {
+      status: 'archived',
+      archivedAt: new Date().toISOString(),
+      archivedBy: req.user.id,
+      archiveReason: 'Deleted by user'
+    });
+
+    return res.json({
+      message: 'Published schedule has been archived',
+      archived: true
     });
   }
 
+  // For draft schedules, actually delete
   const { remove } = require('../data/store.js');
   remove('schedules', req.params.id);
 

@@ -48,15 +48,43 @@ function Schedules() {
           warnings: result.warnings
         });
         await loadSchedules();
-      }
-    } catch (err) {
-      if (err.data && err.data.options) {
+      } else if (result.partialSuccess || result.schedule || result.partialSchedule) {
+        // Partial success - schedule generated with issues
+        const schedule = result.schedule || result.partialSchedule;
+        setGenerationResult({
+          type: 'partial',
+          message: result.message || `Schedule generated with ${result.bestErrorCount || result.errors?.length || 0} issues. Review and edit manually.`,
+          errors: result.errors,
+          options: result.options,
+          schedule: schedule,
+          partialSchedule: schedule,
+          iterations: result.iterations,
+          bestErrorCount: result.bestErrorCount
+        });
+        await loadSchedules();
+      } else {
+        // Complete failure
         setGenerationResult({
           type: 'failure',
+          errors: result.errors,
+          options: result.options,
+          message: result.message || 'Schedule generation failed.'
+        });
+      }
+    } catch (err) {
+      if (err.data && (err.data.options || err.data.partialSchedule)) {
+        const schedule = err.data.schedule || err.data.partialSchedule;
+        setGenerationResult({
+          type: schedule ? 'partial' : 'failure',
           errors: err.data.errors,
           options: err.data.options,
-          message: err.data.message
+          message: err.data.message,
+          schedule: schedule,
+          partialSchedule: schedule
         });
+        if (schedule) {
+          await loadSchedules();
+        }
       } else {
         setError(err.message);
       }
@@ -67,8 +95,13 @@ function Schedules() {
 
   const handleApplyOption = async (optionId) => {
     if (optionId === 'manual_edit') {
-      // Navigate to manual editor with partial schedule
-      navigate(`/schedules/new?manual=true&year=${selectedYear}&month=${selectedMonth}`);
+      // Navigate to manual editor with the existing partial schedule
+      const scheduleId = generationResult?.schedule?.id || generationResult?.partialSchedule?.id;
+      if (scheduleId) {
+        navigate(`/schedules/${scheduleId}/edit`);
+      } else {
+        navigate(`/schedules/new?manual=true&year=${selectedYear}&month=${selectedMonth}`);
+      }
       return;
     }
 
@@ -85,9 +118,35 @@ function Schedules() {
           warnings: result.warnings
         });
         await loadSchedules();
+      } else if (result.partialSuccess || result.schedule || result.partialSchedule) {
+        // Partial success with option applied
+        const schedule = result.schedule || result.partialSchedule;
+        setGenerationResult({
+          type: 'partial',
+          message: result.message || `Schedule generated with option "${optionId}" but still has issues. Review and edit manually.`,
+          errors: result.errors,
+          options: result.options,
+          schedule: schedule,
+          partialSchedule: schedule,
+          appliedOption: optionId
+        });
+        await loadSchedules();
       }
     } catch (err) {
-      setError(err.message || 'Failed to generate with option');
+      if (err.data && (err.data.schedule || err.data.partialSchedule)) {
+        const schedule = err.data.schedule || err.data.partialSchedule;
+        setGenerationResult({
+          type: 'partial',
+          errors: err.data.errors,
+          options: err.data.options,
+          message: err.data.message,
+          schedule: schedule,
+          partialSchedule: schedule
+        });
+        await loadSchedules();
+      } else {
+        setError(err.message || 'Failed to generate with option');
+      }
     } finally {
       setGenerating(false);
     }
@@ -98,6 +157,18 @@ function Schedules() {
 
     try {
       await api.publishSchedule(id);
+      await loadSchedules();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleDelete = async (id, status) => {
+    const action = status === 'published' ? 'archive' : 'delete';
+    if (!confirm(`Are you sure you want to ${action} this schedule?`)) return;
+
+    try {
+      await api.deleteSchedule(id);
       await loadSchedules();
     } catch (err) {
       setError(err.message);
@@ -178,13 +249,23 @@ function Schedules() {
               </div>
             )}
 
-            {generationResult.type === 'failure' && (
+            {(generationResult.type === 'partial' || generationResult.type === 'failure') && (
               <div>
-                <div className="alert alert-error">
-                  <strong>Schedule generation failed</strong>
+                <div className={`alert ${generationResult.type === 'partial' ? 'alert-warning' : 'alert-error'}`}
+                     style={generationResult.type === 'partial' ? { background: '#fff3cd', borderColor: '#ffc107', color: '#856404' } : {}}>
+                  <strong>
+                    {generationResult.type === 'partial'
+                      ? `Schedule Generated with ${generationResult.bestErrorCount || generationResult.errors?.length || 0} Issues`
+                      : 'Schedule generation failed'}
+                  </strong>
                   <p>{generationResult.message}</p>
+                  {generationResult.iterations && (
+                    <p style={{ fontSize: 13, marginTop: 5 }}>
+                      Attempted {generationResult.iterations} iterations to optimize.
+                    </p>
+                  )}
                   <details style={{ marginTop: 10 }}>
-                    <summary>View Errors ({generationResult.errors?.length || 0})</summary>
+                    <summary>View Issues ({generationResult.errors?.length || 0})</summary>
                     <ul style={{ marginTop: 10 }}>
                       {generationResult.errors?.map((e, i) => (
                         <li key={i}>{e.message}</li>
@@ -193,24 +274,23 @@ function Schedules() {
                   </details>
                 </div>
 
-                <h3 style={{ marginTop: 20, marginBottom: 15 }}>Recovery Options</h3>
-                <p style={{ marginBottom: 15, color: '#666' }}>
-                  Choose one of the following options to resolve the scheduling conflict:
-                </p>
-
-                {generationResult.partialSchedule && (
-                  <div style={{ marginBottom: 20 }}>
-                    <p>A partial schedule has been saved for review and manual editing:</p>
-                    <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                {/* Schedule Actions - Always show if schedule exists */}
+                {(generationResult.schedule || generationResult.partialSchedule) && (
+                  <div className="card" style={{ marginTop: 20, background: '#e8f5e9', borderColor: '#4caf50' }}>
+                    <h3 style={{ marginTop: 0, marginBottom: 10 }}>Schedule Ready for Review</h3>
+                    <p style={{ marginBottom: 15 }}>
+                      A schedule has been saved. You can view it, edit it manually to fix issues, or try recovery options below.
+                    </p>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       <Link
-                        to={`/schedules/${generationResult.partialSchedule.id}`}
+                        to={`/schedules/${(generationResult.schedule || generationResult.partialSchedule).id}`}
                         className="btn btn-outline"
                         style={{ textDecoration: 'none' }}
                       >
-                        View Preview
+                        View Schedule
                       </Link>
                       <Link
-                        to={`/schedules/${generationResult.partialSchedule.id}/edit`}
+                        to={`/schedules/${(generationResult.schedule || generationResult.partialSchedule).id}/edit`}
                         className="btn btn-primary"
                         style={{ textDecoration: 'none' }}
                       >
@@ -220,21 +300,30 @@ function Schedules() {
                   </div>
                 )}
 
-                <div className="options-list">
-                  {generationResult.options?.map(option => (
-                    <div
-                      key={option.id}
-                      className="option-card"
-                      onClick={() => handleApplyOption(option.id)}
-                    >
-                      <h4>{option.title}</h4>
-                      <p>{option.description}</p>
-                      <div className="impact">
-                        Impact: {option.impact}
-                      </div>
+                {generationResult.options && generationResult.options.length > 0 && (
+                  <>
+                    <h3 style={{ marginTop: 20, marginBottom: 15 }}>Recovery Options</h3>
+                    <p style={{ marginBottom: 15, color: '#666' }}>
+                      Or try one of these options to regenerate with relaxed constraints:
+                    </p>
+                    <div className="options-list">
+                      {generationResult.options?.filter(o => o.id !== 'manual_edit').map(option => (
+                        <div
+                          key={option.id}
+                          className="option-card"
+                          onClick={() => handleApplyOption(option.id)}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <h4>{option.title}</h4>
+                          <p>{option.description}</p>
+                          <div className="impact">
+                            Impact: {option.impact}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -276,7 +365,7 @@ function Schedules() {
                   <td>{format(new Date(schedule.createdAt), 'MMM d, yyyy HH:mm')}</td>
                   <td>{schedule.publishedAt ? format(new Date(schedule.publishedAt), 'MMM d, yyyy HH:mm') : '-'}</td>
                   <td>
-                    <div style={{ display: 'flex', gap: 5 }}>
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                       <Link
                         to={`/schedules/${schedule.id}`}
                         className="btn btn-outline"
@@ -284,24 +373,29 @@ function Schedules() {
                       >
                         View
                       </Link>
+                      <Link
+                        to={`/schedules/${schedule.id}/edit`}
+                        className="btn btn-outline"
+                        style={{ padding: '5px 10px', textDecoration: 'none' }}
+                      >
+                        Edit
+                      </Link>
                       {schedule.status === 'draft' && (
-                        <>
-                          <Link
-                            to={`/schedules/${schedule.id}/edit`}
-                            className="btn btn-outline"
-                            style={{ padding: '5px 10px', textDecoration: 'none' }}
-                          >
-                            Edit
-                          </Link>
-                          <button
-                            className="btn btn-success"
-                            style={{ padding: '5px 10px' }}
-                            onClick={() => handlePublish(schedule.id)}
-                          >
-                            Publish
-                          </button>
-                        </>
+                        <button
+                          className="btn btn-success"
+                          style={{ padding: '5px 10px' }}
+                          onClick={() => handlePublish(schedule.id)}
+                        >
+                          Publish
+                        </button>
                       )}
+                      <button
+                        className="btn btn-danger"
+                        style={{ padding: '5px 10px' }}
+                        onClick={() => handleDelete(schedule.id, schedule.status)}
+                      >
+                        {schedule.status === 'published' ? 'Archive' : 'Delete'}
+                      </button>
                     </div>
                   </td>
                 </tr>

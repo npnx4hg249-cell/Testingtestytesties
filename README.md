@@ -29,8 +29,9 @@ A comprehensive shift planning application for engineering teams of 19-25 engine
 
 ### Core Scheduling
 - **Constraint-based schedule generation** using a constraint solver approach (not greedy heuristics)
-- **Iterative generation** - Tries up to 50 iterations with randomization to find optimal solution
+- **Iterative generation** - Tries up to 100 iterations with randomization to find optimal solution
 - **Partial schedule support** - Even if perfect solution not found, returns best result for manual editing
+- **Editable schedules** - All schedules (draft or published) can be edited or deleted for corrections
 - Support for multiple shift types: Early, Morning, Late, Night, Training
 - **Weekend-specific shift preferences** (WeekendEarly, WeekendMorning, WeekendLate, WeekendNight)
 - Different coverage requirements for weekdays vs weekends

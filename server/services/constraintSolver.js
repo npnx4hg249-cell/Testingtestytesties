@@ -103,7 +103,7 @@ const SHIFT_CONSISTENCY_GROUPS = {
 const NIGHT_CONSISTENCY_WEEKS = 2;
 
 // Maximum iterations for schedule generation
-const MAX_ITERATIONS = 50;
+const MAX_ITERATIONS = 100;
 
 /**
  * Shuffle array using Fisher-Yates algorithm
@@ -420,6 +420,8 @@ export class ShiftScheduler {
     if (bestResult) {
       const finalResult = {
         ...bestResult,
+        // Include schedule as partialSchedule for consistency with route handler
+        partialSchedule: bestResult.schedule,
         iterations: iterationResults.length,
         iterationHistory: iterationResults,
         bestErrorCount,

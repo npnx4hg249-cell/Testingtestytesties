@@ -55,7 +55,7 @@ function MySchedule() {
       newYear--;
     }
 
-    // Check limits (3 months back for engineers)
+    // Check limits (3 months back for users)
     const limit = subMonths(new Date(), 3);
     const targetDate = new Date(newYear, newMonth - 1, 1);
 
@@ -201,7 +201,7 @@ function MySchedule() {
               <table className="schedule-table">
                 <thead>
                   <tr>
-                    <th className="engineer-name">Engineer</th>
+                    <th className="engineer-name">User</th>
                     {schedule.days.map(day => {
                       const holiday = isHoliday(day.date);
                       const weekend = isWeekend(day.dayOfWeek);

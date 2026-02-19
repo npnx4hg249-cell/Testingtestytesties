@@ -117,7 +117,7 @@ function Requests() {
             <div key={req.id} className={`request-card ${req.type}`}>
               <div className="request-card-header">
                 <div>
-                  <h3>{req.engineerName}</h3>
+                  <h3>{req.userName || req.engineerName || 'Unknown User'}</h3>
                   <span style={{ fontSize: 12, color: '#666' }}>
                     {getRequestTypeName(req.type)}
                   </span>
@@ -228,7 +228,7 @@ function Requests() {
             </div>
             <div className="modal-body">
               <p style={{ marginBottom: 15 }}>
-                You are rejecting the request from <strong>{rejectingRequest?.engineerName}</strong>.
+                You are rejecting the request from <strong>{rejectingRequest?.userName || rejectingRequest?.engineerName || 'this user'}</strong>.
               </p>
               <div className="form-group">
                 <label>Reason for Rejection (required)</label>

@@ -80,8 +80,8 @@ const securityHeaders = (req, res, next) => {
   // XSS protection
   res.setHeader('X-XSS-Protection', '1; mode=block');
 
-  // Content Security Policy
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'");
+  // Content Security Policy - tightened; unsafe-inline needed by React/Vite
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
 
   // Referrer Policy
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -123,7 +123,8 @@ const corsOptions = {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+    // Always check against whitelist, never allow all origins
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -273,10 +274,8 @@ app.get('*', (req, res, next) => {
             <li>Build the client: <code>cd client && npm install && npm run build</code></li>
             <li>Or run in development mode: <code>npm run dev</code></li>
           </ol>
-          <h2>Quick Start</h2>
-          <p>Default admin login:</p>
-          <pre>Email: admin@example.com
-Password: Admin123!@#</pre>
+          <h2>Setup</h2>
+          <p>The application is now running. Complete setup instructions are available in the README.md file.</p>
           <p>API documentation: <a href="/api">/api</a></p>
           <p>Health check: <a href="/api/health">/api/health</a></p>
         </body>
@@ -305,9 +304,7 @@ app.listen(PORT, () => {
 ║   Server running at http://localhost:${PORT}                ║
 ║   API documentation at http://localhost:${PORT}/api         ║
 ║                                                           ║
-║   Default admin login:                                    ║
-║   Email: admin@example.com                                ║
-║   Password: Admin123!@#                                   ║
+║   Setup instructions available in README.md               ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
   `);

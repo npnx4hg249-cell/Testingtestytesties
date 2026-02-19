@@ -36,7 +36,7 @@ function Dashboard() {
       const locked = results[4] || [];
 
       setStats({
-        totalEngineers: engineers.length,
+        totalUsers: engineers.length,
         floaters: engineers.filter(e => e.isFloater).length,
         inTraining: engineers.filter(e => e.inTraining).length,
         totalSchedules: schedules.length,
@@ -101,8 +101,8 @@ function Dashboard() {
 
       <div className="stats-grid">
         <div className="stat-box">
-          <h3>Active Engineers</h3>
-          <div className="value">{stats?.totalEngineers || 0}</div>
+          <h3>Active Users</h3>
+          <div className="value">{stats?.totalUsers || 0}</div>
         </div>
         <div className="stat-box">
           <h3>Floaters</h3>
@@ -131,8 +131,8 @@ function Dashboard() {
             <Link to="/schedules" className="btn btn-primary" style={{ textDecoration: 'none', justifyContent: 'center' }}>
               Generate {currentMonth} Schedule
             </Link>
-            <Link to="/engineers" className="btn btn-outline" style={{ textDecoration: 'none', justifyContent: 'center' }}>
-              Manage Engineers
+            <Link to="/users" className="btn btn-outline" style={{ textDecoration: 'none', justifyContent: 'center' }}>
+              Manage Users
             </Link>
             <Link to="/requests" className="btn btn-outline" style={{ textDecoration: 'none', justifyContent: 'center' }}>
               Review Requests ({pendingRequests.length} pending)
@@ -152,7 +152,7 @@ function Dashboard() {
               {pendingRequests.slice(0, 5).map(req => (
                 <div key={req.id} className={`request-card ${req.type}`} style={{ marginBottom: 10 }}>
                   <div className="request-card-header">
-                    <h3>{req.engineerName}</h3>
+                    <h3>{req.userName || req.engineerName || 'Unknown User'}</h3>
                     <span className="request-card-badge badge-pending">Pending</span>
                   </div>
                   <div className="request-card-body">
@@ -179,7 +179,7 @@ function Dashboard() {
             <table className="schedule-table" style={{ fontSize: 11 }}>
               <thead>
                 <tr>
-                  <th style={{ position: 'sticky', left: 0, background: '#f5f5f5', zIndex: 1 }}>Engineer</th>
+                  <th style={{ position: 'sticky', left: 0, background: '#f5f5f5', zIndex: 1 }}>User</th>
                   {latestSchedule.days.slice(0, 14).map(day => (
                     <th key={day.date} style={{ textAlign: 'center', minWidth: 35 }}>
                       <div>{day.dayOfWeek}</div>
@@ -232,7 +232,7 @@ function Dashboard() {
                 {latestSchedule.engineers.length > 10 && (
                   <tr>
                     <td colSpan={16} style={{ textAlign: 'center', color: '#666' }}>
-                      ... and {latestSchedule.engineers.length - 10} more engineers
+                      ... and {latestSchedule.engineers.length - 10} more users
                     </td>
                   </tr>
                 )}

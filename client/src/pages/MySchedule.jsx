@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../App';
 import api from '../services/api';
+import theme from '../theme';
 import { format, subMonths, addMonths } from 'date-fns';
 
 const SHIFT_TIMES = {
@@ -11,12 +12,13 @@ const SHIFT_TIMES = {
 };
 
 function MySchedule() {
-  const { user } = useAuth();
+  const { user, darkMode } = useAuth();
+  const t = theme(darkMode);
   const [schedule, setSchedule] = useState(null);
   const [holidays, setHolidays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [view, setView] = useState('my-shifts'); // 'my-shifts' or 'team'
+  const [view, setView] = useState('my-shifts');
 
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
@@ -63,7 +65,6 @@ function MySchedule() {
       newYear--;
     }
 
-    // Check limits (3 months back for users)
     const limit = subMonths(new Date(), 3);
     const targetDate = new Date(newYear, newMonth - 1, 1);
 
@@ -98,21 +99,12 @@ function MySchedule() {
     );
   }
 
-  // Find current user's shifts
   const myShifts = schedule?.myShifts || {};
   const myEngineer = schedule?.engineers?.find(e => e.isCurrentUser);
 
-  // Calculate stats
   const totalWorkShifts = Object.values(myShifts).filter(s => s && s !== 'Off' && s !== 'Unavailable').length;
   const offDays = Object.values(myShifts).filter(s => s === 'Off').length;
   const unavailDays = Object.values(myShifts).filter(s => s === 'Unavailable').length;
-
-  // Group shifts by week for the list view
-  const getWeekNumber = (dateStr) => {
-    const d = new Date(dateStr + 'T00:00:00');
-    const dayOfMonth = d.getDate();
-    return Math.ceil(dayOfMonth / 7);
-  };
 
   return (
     <div>
@@ -137,7 +129,7 @@ function MySchedule() {
 
       {!schedule ? (
         <div className="card">
-          <p style={{ color: '#666', textAlign: 'center', padding: 40 }}>
+          <p style={{ color: t.textMuted, textAlign: 'center', padding: 40 }}>
             No published schedule found for {months[selectedMonth - 1]} {selectedYear}.
           </p>
         </div>
@@ -187,13 +179,13 @@ function MySchedule() {
               </div>
 
               {!myEngineer ? (
-                <p style={{ color: '#666', padding: 20 }}>
+                <p style={{ color: t.textMuted, padding: 20 }}>
                   Your user account was not found in this schedule. Contact your manager if this is unexpected.
                 </p>
               ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
+                    <tr style={{ borderBottom: `2px solid ${t.border}`, textAlign: 'left' }}>
                       <th style={{ padding: '10px 12px' }}>Date</th>
                       <th style={{ padding: '10px 12px' }}>Day</th>
                       <th style={{ padding: '10px 12px' }}>Shift</th>
@@ -210,8 +202,6 @@ function MySchedule() {
                       const isOff = shift === 'Off';
                       const isUnavail = shift === 'Unavailable';
 
-                      // Week separator
-                      const prevDay = schedule.days[i - 1];
                       const showWeekSep = i > 0 && day.dayOfWeek === 'Mon';
 
                       return (
@@ -220,17 +210,17 @@ function MySchedule() {
                             <tr>
                               <td colSpan={5} style={{ padding: 0 }}>
                                 <div style={{
-                                  borderTop: '2px solid #e0e0e0',
+                                  borderTop: `2px solid ${t.borderSep}`,
                                   margin: '4px 0'
                                 }} />
                               </td>
                             </tr>
                           )}
                           <tr style={{
-                            borderBottom: '1px solid #f0f0f0',
-                            background: isUnavail ? '#f9f9f9' :
-                                        isOff ? '#fafafa' :
-                                        weekend ? '#f5f8ff' : 'transparent',
+                            borderBottom: `1px solid ${t.borderSep}`,
+                            background: isUnavail ? t.rowUnavail :
+                                        isOff ? t.rowOff :
+                                        weekend ? t.rowWeekend : 'transparent',
                             opacity: isUnavail ? 0.6 : 1
                           }}>
                             <td style={{ padding: '8px 12px', fontVariantNumeric: 'tabular-nums' }}>
@@ -239,7 +229,7 @@ function MySchedule() {
                             <td style={{
                               padding: '8px 12px',
                               fontWeight: weekend ? 'bold' : 'normal',
-                              color: weekend ? '#1565c0' : 'inherit'
+                              color: weekend ? t.textAccent : 'inherit'
                             }}>
                               {day.dayOfWeek}
                             </td>
@@ -252,16 +242,16 @@ function MySchedule() {
                                   {shift}
                                 </span>
                               ) : (
-                                <span style={{ color: '#999' }}>&mdash;</span>
+                                <span style={{ color: t.textFaint }}>&mdash;</span>
                               )}
                             </td>
-                            <td style={{ padding: '8px 12px', color: '#666', fontSize: 13 }}>
+                            <td style={{ padding: '8px 12px', color: t.textMuted, fontSize: 13 }}>
                               {isWorkShift ? SHIFT_TIMES[shift] || '' : ''}
                             </td>
-                            <td style={{ padding: '8px 12px', fontSize: 12, color: '#888' }}>
+                            <td style={{ padding: '8px 12px', fontSize: 12, color: t.textFaint }}>
                               {holiday && (
                                 <span style={{
-                                  background: '#fff3e0',
+                                  background: t.bgWarnLight,
                                   padding: '2px 8px',
                                   borderRadius: 4,
                                   marginRight: 6
@@ -270,7 +260,7 @@ function MySchedule() {
                                 </span>
                               )}
                               {weekend && !holiday && (
-                                <span style={{ color: '#aaa' }}>Weekend</span>
+                                <span style={{ color: t.textFaint }}>Weekend</span>
                               )}
                             </td>
                           </tr>
@@ -290,13 +280,12 @@ function MySchedule() {
                 <h2>Team Schedule</h2>
               </div>
 
-              {/* Holiday Legend */}
               {holidays.length > 0 && (
                 <div style={{ marginBottom: 15 }}>
                   <strong>Holidays:</strong>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 5 }}>
                     {holidays.map((h, i) => (
-                      <span key={i} style={{ background: '#fff3e0', padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
+                      <span key={i} style={{ background: t.bgWarnLight, padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
                         {format(new Date(h.date), 'MMM d')}: {h.nameEn}
                       </span>
                     ))}
@@ -327,7 +316,7 @@ function MySchedule() {
                   </thead>
                   <tbody>
                     {schedule.engineers.map(eng => (
-                      <tr key={eng.id} style={eng.isCurrentUser ? { background: '#e3f2fd' } : {}}>
+                      <tr key={eng.id} style={eng.isCurrentUser ? { background: t.bgHighlight } : {}}>
                         <td className="engineer-name" style={{ backgroundColor: eng.tierColor }}>
                           {eng.name}
                           {eng.isCurrentUser && <strong style={{ marginLeft: 5 }}>(You)</strong>}

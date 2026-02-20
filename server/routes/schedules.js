@@ -9,6 +9,7 @@ import {
   create,
   update,
   find,
+  remove,
   getActiveEngineers,
   createSchedule,
   getScheduleForMonth,
@@ -544,7 +545,6 @@ router.delete('/:id', authenticate, requireManager, (req, res) => {
   }
 
   // For draft schedules, actually delete
-  const { remove } = require('../data/store.js');
   remove('schedules', req.params.id);
 
   res.json({

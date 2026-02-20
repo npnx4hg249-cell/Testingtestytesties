@@ -8,6 +8,18 @@ import { toDateString, isWeekend, getPreviousDay } from '../utils/DateUtils.js';
 import { getTransitionViolation } from '../rules/GermanLaborLaws.js';
 
 /**
+ * Fisher-Yates shuffle for randomizing arrays
+ */
+function shuffleArray(array) {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/**
  * Night Shift Strategy
  * Assigns night shifts in cohorts for 2-week blocks to maintain continuity
  */
@@ -69,7 +81,8 @@ export class NightShiftStrategy {
     // 1. Availability during the block
     // 2. Not in previous cohort (for rotation)
     // 3. Night shift preference in their profile
-    const scored = eligibleEngineers.map(engineer => {
+    // Shuffle first for randomized tie-breaking
+    const scored = shuffleArray(eligibleEngineers).map(engineer => {
       let score = 0;
 
       // Availability score
@@ -89,6 +102,9 @@ export class NightShiftStrategy {
       if (engineer.preferences?.includes(SHIFTS.NIGHT)) {
         score += 20;
       }
+
+      // Small random factor for tie-breaking
+      score += Math.random() * 2;
 
       return { engineer, score, availabilityRatio };
     });

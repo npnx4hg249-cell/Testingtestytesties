@@ -57,7 +57,8 @@ export const SHIFT_GROUPS = {
 export const FORBIDDEN_TRANSITIONS = [
   { from: SHIFTS.NIGHT, to: SHIFTS.EARLY, reason: 'Insufficient rest time (< 11 hours)' },
   { from: SHIFTS.NIGHT, to: SHIFTS.MORNING, reason: 'Insufficient rest time (< 11 hours)' },
-  { from: SHIFTS.LATE, to: SHIFTS.EARLY, reason: 'Insufficient rest time (< 11 hours)' }
+  { from: SHIFTS.LATE, to: SHIFTS.EARLY, reason: 'Insufficient rest time (< 11 hours)' },
+  { from: SHIFTS.LATE, to: SHIFTS.MORNING, reason: 'Insufficient rest time (10.5 hours < 11 required)' }
 ];
 
 // Color coding for UI display

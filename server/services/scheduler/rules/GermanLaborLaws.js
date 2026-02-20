@@ -214,6 +214,12 @@ export function getTransitionViolation(fromShift, toShift) {
         reason: 'Late (ends 23:30) to Early (starts 07:00) provides only 7.5 hours rest, requires 11 hours minimum'
       };
     }
+    if (toShift === SHIFTS.MORNING) {
+      return {
+        law: '§5 ArbZG',
+        reason: 'Late (ends 23:30) to Morning (starts 10:00) provides only 10.5 hours rest, requires 11 hours minimum'
+      };
+    }
   }
 
   return null;

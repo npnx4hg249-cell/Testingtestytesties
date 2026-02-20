@@ -8,6 +8,18 @@ import { toDateString, isWeekend, getPreviousDay, findWeekIndex } from '../utils
 import { getTransitionViolation, ArbZG } from '../rules/GermanLaborLaws.js';
 
 /**
+ * Fisher-Yates shuffle for randomizing arrays
+ */
+function shuffleArray(array) {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/**
  * Day Shift Strategy
  * Assigns Early, Morning, and Late shifts while maintaining consistency
  */
@@ -204,7 +216,8 @@ export class DayShiftStrategy {
   scoreEngineers(eligible, schedule, date, shift, days, weeks) {
     const currentWeekIndex = findWeekIndex(weeks, date);
 
-    return eligible.map(engineer => {
+    // Shuffle first to randomize tie-breaking
+    return shuffleArray(eligible).map(engineer => {
       let score = 0;
 
       // Consistency bonus: favor engineers whose previous week matches this shift type
@@ -230,6 +243,9 @@ export class DayShiftStrategy {
       if (engineer.tier === 'T1') {
         score += 5;
       }
+
+      // Add small random factor for fine-grained tie-breaking
+      score += Math.random() * 2;
 
       return { engineer, score };
     }).sort((a, b) => b.score - a.score);

@@ -1,14 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../App';
 import api from '../services/api';
+import theme from '../theme';
 import { format, subMonths, addMonths } from 'date-fns';
 
+const SHIFT_TIMES = {
+  Early: '07:00 - 15:30',
+  Morning: '10:00 - 18:30',
+  Late: '15:00 - 23:30',
+  Night: '23:00 - 07:30'
+};
+
 function MySchedule() {
-  const { user } = useAuth();
+  const { user, darkMode } = useAuth();
+  const t = theme(darkMode);
   const [schedule, setSchedule] = useState(null);
   const [holidays, setHolidays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [view, setView] = useState('my-shifts');
 
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
@@ -55,7 +65,6 @@ function MySchedule() {
       newYear--;
     }
 
-    // Check limits (3 months back for users)
     const limit = subMonths(new Date(), 3);
     const targetDate = new Date(newYear, newMonth - 1, 1);
 
@@ -64,6 +73,7 @@ function MySchedule() {
       return;
     }
 
+    setError('');
     setSelectedYear(newYear);
     setSelectedMonth(newMonth);
   };
@@ -89,9 +99,12 @@ function MySchedule() {
     );
   }
 
-  // Find current user's shifts
   const myShifts = schedule?.myShifts || {};
   const myEngineer = schedule?.engineers?.find(e => e.isCurrentUser);
+
+  const totalWorkShifts = Object.values(myShifts).filter(s => s && s !== 'Off' && s !== 'Unavailable').length;
+  const offDays = Object.values(myShifts).filter(s => s === 'Off').length;
+  const unavailDays = Object.values(myShifts).filter(s => s === 'Unavailable').length;
 
   return (
     <div>
@@ -103,155 +116,239 @@ function MySchedule() {
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <button className="btn btn-outline" onClick={() => changeMonth(-1)}>
-            ← Previous
+            &larr; Previous
           </button>
           <h2 style={{ margin: 0 }}>
             {months[selectedMonth - 1]} {selectedYear}
           </h2>
           <button className="btn btn-outline" onClick={() => changeMonth(1)}>
-            Next →
+            Next &rarr;
           </button>
         </div>
       </div>
 
       {!schedule ? (
         <div className="card">
-          <p style={{ color: '#666', textAlign: 'center', padding: 40 }}>
+          <p style={{ color: t.textMuted, textAlign: 'center', padding: 40 }}>
             No published schedule found for {months[selectedMonth - 1]} {selectedYear}.
           </p>
         </div>
       ) : (
         <>
-          {/* My Shifts Summary */}
+          {/* Summary Stats */}
           {myEngineer && (
             <div className="card" style={{ marginBottom: 20 }}>
-              <div className="card-header">
-                <h2>My Shifts This Month</h2>
-              </div>
               <div className="stats-grid">
                 <div className="stat-box">
-                  <h3>Total Shifts</h3>
-                  <div className="value">
-                    {Object.values(myShifts).filter(s => s && s !== 'OFF' && s !== 'Unavailable').length}
-                  </div>
+                  <h3>Work Shifts</h3>
+                  <div className="value">{totalWorkShifts}</div>
                 </div>
                 <div className="stat-box">
-                  <h3>OFF Days</h3>
-                  <div className="value">
-                    {Object.values(myShifts).filter(s => s === 'OFF').length}
-                  </div>
+                  <h3>Off Days</h3>
+                  <div className="value">{offDays}</div>
                 </div>
                 <div className="stat-box">
                   <h3>Unavailable</h3>
-                  <div className="value">
-                    {Object.values(myShifts).filter(s => s === 'Unavailable').length}
-                  </div>
-                </div>
-              </div>
-
-              {/* My shifts list */}
-              <div style={{ marginTop: 20 }}>
-                <h4>Upcoming Shifts</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginTop: 10 }}>
-                  {schedule.days
-                    .filter(d => myShifts[d.date] && myShifts[d.date] !== 'OFF' && myShifts[d.date] !== 'Unavailable')
-                    .slice(0, 14)
-                    .map(d => (
-                      <div
-                        key={d.date}
-                        style={{
-                          padding: 10,
-                          borderRadius: 4,
-                          background: '#f5f5f5',
-                          border: '1px solid #ddd'
-                        }}
-                      >
-                        <div style={{ fontWeight: 'bold' }}>{d.dayOfWeek}, {d.dayNumber}</div>
-                        <span className={`shift-cell shift-${myShifts[d.date]}`}>
-                          {myShifts[d.date]}
-                        </span>
-                      </div>
-                    ))}
+                  <div className="value">{unavailDays}</div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Full Schedule Grid */}
-          <div className="card">
-            <div className="card-header">
-              <h2>Full Team Schedule</h2>
-            </div>
+          {/* View Toggle */}
+          <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+            <button
+              className={`btn ${view === 'my-shifts' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setView('my-shifts')}
+            >
+              My Shifts
+            </button>
+            <button
+              className={`btn ${view === 'team' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setView('team')}
+            >
+              Team Schedule
+            </button>
+          </div>
 
-            {/* Holiday Legend */}
-            {holidays.length > 0 && (
-              <div style={{ marginBottom: 15 }}>
-                <strong>Holidays:</strong>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 5 }}>
-                  {holidays.map((h, i) => (
-                    <span key={i} style={{ background: '#fff3e0', padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
-                      {format(new Date(h.date), 'MMM d')}: {h.nameEn}
-                    </span>
-                  ))}
-                </div>
+          {/* My Shifts List View */}
+          {view === 'my-shifts' && (
+            <div className="card">
+              <div className="card-header">
+                <h2>My Shifts &mdash; {months[selectedMonth - 1]} {selectedYear}</h2>
               </div>
-            )}
 
-            <div className="schedule-grid">
-              <table className="schedule-table">
-                <thead>
-                  <tr>
-                    <th className="engineer-name">User</th>
-                    {schedule.days.map(day => {
+              {!myEngineer ? (
+                <p style={{ color: t.textMuted, padding: 20 }}>
+                  Your user account was not found in this schedule. Contact your manager if this is unexpected.
+                </p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: `2px solid ${t.border}`, textAlign: 'left' }}>
+                      <th style={{ padding: '10px 12px' }}>Date</th>
+                      <th style={{ padding: '10px 12px' }}>Day</th>
+                      <th style={{ padding: '10px 12px' }}>Shift</th>
+                      <th style={{ padding: '10px 12px' }}>Hours</th>
+                      <th style={{ padding: '10px 12px' }}>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {schedule.days.map((day, i) => {
+                      const shift = myShifts[day.date];
                       const holiday = isHoliday(day.date);
                       const weekend = isWeekend(day.dayOfWeek);
+                      const isWorkShift = shift && shift !== 'Off' && shift !== 'Unavailable';
+                      const isOff = shift === 'Off';
+                      const isUnavail = shift === 'Unavailable';
+
+                      const showWeekSep = i > 0 && day.dayOfWeek === 'Mon';
+
                       return (
-                        <th
-                          key={day.date}
-                          className={`${weekend ? 'weekend' : ''} ${holiday ? 'holiday' : ''}`}
-                          title={holiday ? holiday.nameEn : day.date}
-                        >
-                          <div>{day.dayOfWeek}</div>
-                          <div>{day.dayNumber}</div>
-                        </th>
+                        <React.Fragment key={day.date}>
+                          {showWeekSep && (
+                            <tr>
+                              <td colSpan={5} style={{ padding: 0 }}>
+                                <div style={{
+                                  borderTop: `2px solid ${t.borderSep}`,
+                                  margin: '4px 0'
+                                }} />
+                              </td>
+                            </tr>
+                          )}
+                          <tr style={{
+                            borderBottom: `1px solid ${t.borderSep}`,
+                            background: isUnavail ? t.rowUnavail :
+                                        isOff ? t.rowOff :
+                                        weekend ? t.rowWeekend : 'transparent',
+                            opacity: isUnavail ? 0.6 : 1
+                          }}>
+                            <td style={{ padding: '8px 12px', fontVariantNumeric: 'tabular-nums' }}>
+                              {day.date}
+                            </td>
+                            <td style={{
+                              padding: '8px 12px',
+                              fontWeight: weekend ? 'bold' : 'normal',
+                              color: weekend ? t.textAccent : 'inherit'
+                            }}>
+                              {day.dayOfWeek}
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              {shift ? (
+                                <span
+                                  className={`shift-cell shift-${shift}`}
+                                  style={{ padding: '3px 12px', borderRadius: 4, fontSize: 13 }}
+                                >
+                                  {shift}
+                                </span>
+                              ) : (
+                                <span style={{ color: t.textFaint }}>&mdash;</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px 12px', color: t.textMuted, fontSize: 13 }}>
+                              {isWorkShift ? SHIFT_TIMES[shift] || '' : ''}
+                            </td>
+                            <td style={{ padding: '8px 12px', fontSize: 12, color: t.textFaint }}>
+                              {holiday && (
+                                <span style={{
+                                  background: t.bgWarnLight,
+                                  padding: '2px 8px',
+                                  borderRadius: 4,
+                                  marginRight: 6
+                                }}>
+                                  {holiday.nameEn}
+                                </span>
+                              )}
+                              {weekend && !holiday && (
+                                <span style={{ color: t.textFaint }}>Weekend</span>
+                              )}
+                            </td>
+                          </tr>
+                        </React.Fragment>
                       );
                     })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {schedule.engineers.map(eng => (
-                    <tr key={eng.id} style={eng.isCurrentUser ? { background: '#e3f2fd' } : {}}>
-                      <td className="engineer-name" style={{ backgroundColor: eng.tierColor }}>
-                        {eng.name}
-                        {eng.isCurrentUser && <strong style={{ marginLeft: 5 }}>(You)</strong>}
-                        {eng.isFloater && <span style={{ fontSize: 10, marginLeft: 5 }}>(F)</span>}
-                      </td>
-                      {eng.shifts.map((shift, i) => {
-                        const day = schedule.days[i];
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* Team Schedule Grid View */}
+          {view === 'team' && (
+            <div className="card">
+              <div className="card-header">
+                <h2>Team Schedule</h2>
+              </div>
+
+              {holidays.length > 0 && (
+                <div style={{ marginBottom: 15 }}>
+                  <strong>Holidays:</strong>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 5 }}>
+                    {holidays.map((h, i) => (
+                      <span key={i} style={{ background: t.bgWarnLight, padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
+                        {format(new Date(h.date), 'MMM d')}: {h.nameEn}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="schedule-grid">
+                <table className="schedule-table">
+                  <thead>
+                    <tr>
+                      <th className="engineer-name">User</th>
+                      {schedule.days.map(day => {
                         const holiday = isHoliday(day.date);
                         const weekend = isWeekend(day.dayOfWeek);
                         return (
-                          <td
+                          <th
                             key={day.date}
                             className={`${weekend ? 'weekend' : ''} ${holiday ? 'holiday' : ''}`}
+                            title={holiday ? holiday.nameEn : day.date}
                           >
-                            {shift.shift && (
-                              <span
-                                className={`shift-cell shift-${shift.shift}`}
-                                title={shift.shift}
-                              >
-                                {shift.shift === 'Unavailable' ? 'U' : shift.shift[0]}
-                              </span>
-                            )}
-                          </td>
+                            <div>{day.dayOfWeek}</div>
+                            <div>{day.dayNumber}</div>
+                          </th>
                         );
                       })}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {schedule.engineers.map(eng => (
+                      <tr key={eng.id} style={eng.isCurrentUser ? { background: t.bgHighlight } : {}}>
+                        <td className="engineer-name" style={{ backgroundColor: eng.tierColor }}>
+                          {eng.name}
+                          {eng.isCurrentUser && <strong style={{ marginLeft: 5 }}>(You)</strong>}
+                          {eng.isFloater && <span style={{ fontSize: 10, marginLeft: 5 }}>(F)</span>}
+                        </td>
+                        {eng.shifts.map((shift, i) => {
+                          const day = schedule.days[i];
+                          const holiday = isHoliday(day.date);
+                          const weekend = isWeekend(day.dayOfWeek);
+                          return (
+                            <td
+                              key={day.date}
+                              className={`${weekend ? 'weekend' : ''} ${holiday ? 'holiday' : ''}`}
+                            >
+                              {shift.shift && (
+                                <span
+                                  className={`shift-cell shift-${shift.shift}`}
+                                  title={shift.shift}
+                                >
+                                  {shift.shift === 'Unavailable' ? 'U' : shift.shift[0]}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Shift Legend */}
           <div className="card" style={{ marginTop: 20 }}>
@@ -263,7 +360,7 @@ function MySchedule() {
               <div><span className="shift-cell shift-Morning">M</span> Morning (10:00-18:30)</div>
               <div><span className="shift-cell shift-Late">L</span> Late (15:00-23:30)</div>
               <div><span className="shift-cell shift-Night">N</span> Night (23:00-07:30)</div>
-              <div><span className="shift-cell shift-OFF">O</span> Scheduled Off</div>
+              <div><span className="shift-cell shift-Off">O</span> Scheduled Off</div>
               <div><span className="shift-cell shift-Unavailable">U</span> Unavailable</div>
             </div>
           </div>

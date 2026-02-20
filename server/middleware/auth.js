@@ -311,6 +311,7 @@ export function authenticate(req, res, next) {
   }
 
   // Attach user info to request
+  // Note: In unified user system, user.id IS the engineerId (same record)
   req.user = {
     id: user.id,
     email: user.email,
@@ -318,7 +319,9 @@ export function authenticate(req, res, next) {
     isAdmin: user.isAdmin || false,
     isManager: user.isManager || false,
     isFloater: user.isFloater || false,
-    inTraining: user.inTraining || false
+    inTraining: user.inTraining || false,
+    engineerId: user.id,  // For backward compatibility with schedule views
+    tier: user.tier || 'T2'
   };
 
   next();

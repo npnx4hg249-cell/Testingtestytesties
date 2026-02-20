@@ -980,7 +980,7 @@ router.get('/:id/unavailable-dates', authenticate, (req, res) => {
   // Future: This structure supports SAP WFM sync
   const unavailableDates = (engineer.unavailableDays || []).map(date => ({
     date,
-    type: engineer.unavailableTypes?.[date] || 'unavailable', // sick, vacation, other
+    type: engineer.unavailableTypes?.[date] || 'unavailable', // sick, vacation, personal, predetermined_off
     source: engineer.unavailableSources?.[date] || 'manual', // manual, sap_wfm, api
     notes: engineer.unavailableNotes?.[date] || ''
   }));
@@ -1023,7 +1023,7 @@ router.post('/:id/unavailable-dates', authenticate, (req, res) => {
 
   // Validate and process dates
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  const validTypes = ['sick', 'vacation', 'unavailable', 'personal', 'other'];
+  const validTypes = ['sick', 'vacation', 'unavailable', 'personal', 'other', 'predetermined_off'];
 
   const currentDays = new Set(engineer.unavailableDays || []);
   const currentTypes = { ...(engineer.unavailableTypes || {}) };

@@ -84,7 +84,7 @@ export const UNAVAILABLE_TYPES = {
   VACATION: { countsAsOff: false, label: 'Vacation' },
   PERSONAL: { countsAsOff: false, label: 'Personal' },
   SICK: { countsAsOff: false, label: 'Sick Leave' },
-  OTHER: { countsAsOff: true, label: 'Other' } // Max 2 can count as off days
+  PREDETERMINED_OFF: { countsAsOff: true, label: 'Predetermined Off' }
 };
 
 // Floater configuration

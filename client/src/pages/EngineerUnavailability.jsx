@@ -271,7 +271,7 @@ function EngineerUnavailability() {
               <option value="vacation">Vacation</option>
               <option value="sick">Sick Leave</option>
               <option value="personal">Personal</option>
-              <option value="unavailable">Other</option>
+              <option value="predetermined_off">Predetermined Off</option>
             </select>
 
             <button

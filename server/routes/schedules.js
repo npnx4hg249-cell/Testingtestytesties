@@ -223,11 +223,11 @@ function shuffleArray(arr) {
   return result;
 }
 
-const MAX_GENERATE_ITERATIONS = 100;
+const MAX_GENERATE_ITERATIONS = 500;
 
 /**
  * POST /api/schedules/generate
- * Generate a new schedule - iterates up to 100 times to find the best solution
+ * Generate a new schedule - iterates up to 500 times, stops early on success
  */
 router.post('/generate', authenticate, requireManager, (req, res) => {
   const { year, month, options = {} } = req.body;
@@ -259,11 +259,14 @@ router.post('/generate', authenticate, requireManager, (req, res) => {
   // Create the date for the month
   const monthDate = new Date(year, month - 1, 1);
 
-  // Iterative generation - try up to MAX_GENERATE_ITERATIONS times with shuffled engineers
+  // Iterative generation - try up to MAX_GENERATE_ITERATIONS times, stop on success
   let bestResult = null;
   let bestErrorCount = Infinity;
+  let totalIterations = 0;
 
   for (let iteration = 0; iteration < MAX_GENERATE_ITERATIONS; iteration++) {
+    totalIterations = iteration + 1;
+
     // Shuffle engineers on each iteration after the first for randomized constraint solving
     const iterEngineers = iteration === 0 ? engineers : shuffleArray(engineers);
 
@@ -291,18 +294,20 @@ router.post('/generate', authenticate, requireManager, (req, res) => {
         schedule,
         warnings: result.warnings,
         stats: result.stats,
-        iterations: iteration + 1
+        iterations: totalIterations
       });
     }
 
     const errorCount = result.errors ? result.errors.length : Infinity;
     if (errorCount < bestErrorCount) {
       bestErrorCount = errorCount;
-      bestResult = { ...result, iterations: iteration + 1 };
+      bestResult = { ...result, iterations: totalIterations };
     }
 
-    // Early stop if we found a very good solution after several attempts
-    if (iteration >= 5 && bestErrorCount <= 2) break;
+    // Early stop: good-enough solution found after reasonable attempts
+    if (iteration >= 10 && bestErrorCount <= 2) break;
+    // Diminishing returns: if no improvement in many iterations, stop
+    if (iteration >= 50 && bestErrorCount <= 5) break;
   }
 
   // No perfect solution found - save best partial schedule for manual editing
@@ -327,9 +332,9 @@ router.post('/generate', authenticate, requireManager, (req, res) => {
     schedule: partialSchedule,
     partialSchedule: partialSchedule,
     canManualEdit: true,
-    iterations: bestResult.iterations || MAX_GENERATE_ITERATIONS,
+    iterations: totalIterations,
     bestErrorCount,
-    message: `Schedule generated with ${bestErrorCount} issue(s) after ${bestResult.iterations || MAX_GENERATE_ITERATIONS} attempts. Review and edit manually or use recovery options.`
+    message: `Schedule generated with ${bestErrorCount} issue(s) after ${totalIterations} attempts. Review and edit manually or use recovery options.`
   });
 });
 
@@ -372,11 +377,13 @@ router.post('/generate-with-option', authenticate, requireManager, (req, res) =>
       });
   }
 
-  // Iterative generation with the modified options
+  // Iterative generation with the modified options - stop on success
   let bestResult = null;
   let bestErrorCount = Infinity;
+  let totalIterations = 0;
 
   for (let iteration = 0; iteration < MAX_GENERATE_ITERATIONS; iteration++) {
+    totalIterations = iteration + 1;
     const iterEngineers = iteration === 0 ? engineers : shuffleArray(engineers);
 
     const scheduler = new Scheduler({
@@ -405,17 +412,18 @@ router.post('/generate-with-option', authenticate, requireManager, (req, res) =>
         warnings: result.warnings,
         stats: result.stats,
         appliedOption: optionId,
-        iterations: iteration + 1
+        iterations: totalIterations
       });
     }
 
     const errorCount = result.errors ? result.errors.length : Infinity;
     if (errorCount < bestErrorCount) {
       bestErrorCount = errorCount;
-      bestResult = { ...result, iterations: iteration + 1 };
+      bestResult = { ...result, iterations: totalIterations };
     }
 
-    if (iteration >= 5 && bestErrorCount <= 2) break;
+    if (iteration >= 10 && bestErrorCount <= 2) break;
+    if (iteration >= 50 && bestErrorCount <= 5) break;
   }
 
   // Save best partial schedule for manual editing
@@ -441,9 +449,9 @@ router.post('/generate-with-option', authenticate, requireManager, (req, res) =>
     partialSchedule: partialSchedule,
     canManualEdit: true,
     appliedOption: optionId,
-    iterations: bestResult.iterations || MAX_GENERATE_ITERATIONS,
+    iterations: totalIterations,
     bestErrorCount,
-    message: `Schedule generated with ${bestErrorCount} issue(s) after ${bestResult.iterations || MAX_GENERATE_ITERATIONS} attempts. Review and edit manually.`
+    message: `Schedule generated with ${bestErrorCount} issue(s) after ${totalIterations} attempts. Review and edit manually.`
   });
 });
 

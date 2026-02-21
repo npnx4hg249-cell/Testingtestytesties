@@ -17,9 +17,10 @@ import { DayShiftStrategy } from '../strategies/DayShiftStrategy.js';
 import { FloaterStrategy } from '../strategies/FloaterStrategy.js';
 
 // Configuration constants
-const MAX_ITERATIONS = 250;
+const MAX_ITERATIONS = 1000;
 const TARGET_SHIFTS_PER_WEEK = 5; // Target 5 working days per week for core engineers
 const MIN_SHIFTS_PER_WEEK = 4;   // Minimum shifts to avoid month-off scenarios
+const MAX_OFF_PER_WEEK = 2;      // Maximum OFF days per week for core engineers
 
 /**
  * Fisher-Yates shuffle for randomizing arrays in-place
@@ -55,6 +56,77 @@ export class Scheduler {
     this.violations = [];
     this.warnings = [];
     this.stats = null;
+
+    // Pre-compute previous month tail data for cross-month continuity
+    this.prevMonthTail = this._buildPrevMonthTail();
+  }
+
+  /**
+   * Build a lookup of the last 6 days of the previous month's schedule
+   * for each engineer, used to prevent German labor law violations
+   * (max 6 consecutive work days) across month boundaries.
+   * Returns { engineerId: [{ date, shift }, ...] } sorted chronologically.
+   */
+  _buildPrevMonthTail() {
+    if (!this.previousMonthSchedule) return {};
+
+    const tail = {};
+    // Get the previous month's date range (last 6 days)
+    const prevMonthDate = new Date(this.month.getFullYear(), this.month.getMonth() - 1, 1);
+    const prevDays = getMonthDays(prevMonthDate);
+    const lastDays = prevDays.slice(-6); // Last 6 days of previous month
+
+    for (const engineer of this.engineers) {
+      const entries = [];
+      for (const day of lastDays) {
+        const dateStr = toDateString(day);
+        const shift = this.previousMonthSchedule[engineer.id]?.[dateStr];
+        if (shift !== undefined) {
+          entries.push({ date: dateStr, shift, day });
+        }
+      }
+      if (entries.length > 0) {
+        tail[engineer.id] = entries;
+      }
+    }
+
+    return tail;
+  }
+
+  /**
+   * Get the shift for an engineer on a date, checking both current schedule and
+   * previous month's schedule for cross-month boundary lookups.
+   */
+  getShiftWithPrevMonth(schedule, engineerId, dateStr) {
+    const shift = schedule[engineerId]?.[dateStr];
+    if (shift !== undefined && shift !== null) return shift;
+
+    // Check previous month's schedule
+    if (this.previousMonthSchedule) {
+      return this.previousMonthSchedule[engineerId]?.[dateStr] || null;
+    }
+    return null;
+  }
+
+  /**
+   * Count consecutive work days at the end of the previous month for an engineer.
+   * Used to ensure the new month doesn't create a streak > 6 when combined.
+   */
+  getPrevMonthTrailingWorkDays(engineerId) {
+    const entries = this.prevMonthTail[engineerId];
+    if (!entries || entries.length === 0) return 0;
+
+    let count = 0;
+    // Walk backwards from the last day
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const shift = entries[i].shift;
+      if (shift && shift !== SHIFTS.OFF && shift !== SHIFTS.UNAVAILABLE) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    return count;
   }
 
   /**
@@ -118,6 +190,150 @@ export class Scheduler {
     const type = engineer.unavailableTypes?.[dateStr];
     // Support both new 'predetermined_off' and legacy 'unavailable' type
     return type === 'predetermined_off' || type === 'unavailable';
+  }
+
+  /**
+   * Check whether an engineer can still get 2 consecutive OFF days in a week.
+   * Returns true if there are at least 2 consecutive null/OFF slots remaining.
+   */
+  canStillGetConsecutiveOff(schedule, engineerId, week) {
+    for (let i = 0; i < week.length - 1; i++) {
+      const dateStr1 = toDateString(week[i]);
+      const dateStr2 = toDateString(week[i + 1]);
+      const shift1 = schedule[engineerId]?.[dateStr1];
+      const shift2 = schedule[engineerId]?.[dateStr2];
+
+      const slot1Free = shift1 === null || shift1 === undefined || shift1 === SHIFTS.OFF;
+      const slot2Free = shift2 === null || shift2 === undefined || shift2 === SHIFTS.OFF;
+
+      if (slot1Free && slot2Free) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Reserve OFF days BEFORE assigning shifts.
+   * Pre-computes and locks 2 consecutive OFF day slots per engineer per week.
+   * This prevents shift assignment from consuming all available slots.
+   */
+  reserveOffDays(schedule) {
+    const weeks = this.getWeeksInMonth();
+    const coreEngineers = this.engineers.filter(e => !e.isFloater && !e.inTraining);
+    const errors = [];
+
+    for (const week of weeks) {
+      const shuffledEngineers = shuffleArray(coreEngineers);
+
+      for (const engineer of shuffledEngineers) {
+        // Fixed off days are handled separately
+        if (engineer.fixedOffDays) {
+          for (const day of week) {
+            const dayOfWeek = day.getDay();
+            const dateStr = toDateString(day);
+            if (engineer.fixedOffDays.includes(dayOfWeek) &&
+                schedule[engineer.id][dateStr] === null) {
+              schedule[engineer.id][dateStr] = SHIFTS.OFF;
+            }
+          }
+          continue;
+        }
+
+        // Count existing OFF days (from predetermined off, etc.)
+        const existingOffDays = week.filter(d =>
+          schedule[engineer.id][toDateString(d)] === SHIFTS.OFF
+        );
+
+        // Check if we already have 2+ consecutive OFF days
+        let hasConsecutiveOff = false;
+        for (let i = 0; i < existingOffDays.length - 1; i++) {
+          const diff = Math.abs(existingOffDays[i + 1].getTime() - existingOffDays[i].getTime()) / (1000 * 60 * 60 * 24);
+          if (diff === 1) {
+            hasConsecutiveOff = true;
+            break;
+          }
+        }
+
+        if (hasConsecutiveOff && existingOffDays.length >= 2) continue;
+
+        const neededOff = Math.max(0, MAX_OFF_PER_WEEK - existingOffDays.length);
+        if (neededOff === 0 && hasConsecutiveOff) continue;
+
+        // Find best consecutive pair for OFF days
+        const availableForOff = week.filter(d => {
+          const dateStr = toDateString(d);
+          const shift = schedule[engineer.id][dateStr];
+          return shift === null || shift === undefined;
+        });
+
+        let bestPair = null;
+        let bestScore = -Infinity;
+
+        for (let i = 0; i < availableForOff.length - 1; i++) {
+          const day1 = availableForOff[i];
+          const day2 = availableForOff[i + 1];
+
+          const diff = Math.abs(day2.getTime() - day1.getTime()) / (1000 * 60 * 60 * 24);
+          if (diff !== 1) continue;
+
+          let score = 0;
+
+          // PENALIZE weekends heavily - we need people working weekends
+          if (isWeekend(day1)) score -= 15;
+          if (isWeekend(day2)) score -= 15;
+
+          // Prefer holidays
+          if (this.isHoliday(day1, engineer.state)) score += 5;
+          if (this.isHoliday(day2, engineer.state)) score += 5;
+
+          // Prefer mid-week days (Tue-Thu) for OFF
+          const dow1 = day1.getDay();
+          const dow2 = day2.getDay();
+          if (dow1 >= 2 && dow1 <= 4) score += 3;
+          if (dow2 >= 2 && dow2 <= 4) score += 3;
+
+          // Prefer if already has one OFF day adjacent
+          const shift1 = schedule[engineer.id][toDateString(day1)];
+          const shift2 = schedule[engineer.id][toDateString(day2)];
+          if (shift1 === SHIFTS.OFF || shift2 === SHIFTS.OFF) score += 12;
+
+          // Spread OFF days: penalize if too many engineers already off on these days
+          const offCount1 = this.countOffOnDay(schedule, coreEngineers, toDateString(day1));
+          const offCount2 = this.countOffOnDay(schedule, coreEngineers, toDateString(day2));
+          score -= (offCount1 + offCount2) * 3;
+
+          // Cross-month: for first week, check previous month trailing work days
+          if (week === weeks[0]) {
+            const trailingWorkDays = this.getPrevMonthTrailingWorkDays(engineer.id);
+            if (trailingWorkDays >= 4) {
+              const maxWorkBeforeOff = Math.max(0, ArbZG.MAX_CONSECUTIVE_WORK_DAYS - trailingWorkDays);
+              const dayIndex1 = week.indexOf(day1);
+              // Strongly prefer earlier OFF if previous month had long streak
+              if (dayIndex1 <= maxWorkBeforeOff) score += 20;
+            }
+          }
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestPair = [day1, day2];
+          }
+        }
+
+        if (bestPair) {
+          schedule[engineer.id][toDateString(bestPair[0])] = SHIFTS.OFF;
+          schedule[engineer.id][toDateString(bestPair[1])] = SHIFTS.OFF;
+        } else if (neededOff > 0) {
+          // Could not find consecutive pair - report error, do NOT silently degrade
+          errors.push({
+            type: 'off_day_reservation_failed',
+            engineer: engineer.name,
+            week: toDateString(week[0]),
+            message: `${engineer.name}: could not reserve 2 consecutive OFF days in week starting ${toDateString(week[0])}`
+          });
+        }
+      }
+    }
+
+    return { schedule, errors };
   }
 
   /**
@@ -221,40 +437,24 @@ export class Scheduler {
   }
 
   /**
-   * Assign OFF days to ensure 2 consecutive days per week (HARD constraint)
-   * Distributes OFF days evenly and AVOIDS weekends to maintain weekend coverage.
-   * OFF day budget: exactly 2 per week per engineer (no more, no fewer).
+   * Verify and repair OFF days after shift assignment.
+   * Since OFF days are now reserved upfront via reserveOffDays(), this method
+   * checks that the reservation survived shift assignment and repairs if needed.
+   * Does NOT fall back to non-consecutive OFF - reports errors instead.
    */
   assignOffDays(schedule) {
-    const days = this.getDays();
     const weeks = this.getWeeksInMonth();
     const coreEngineers = this.engineers.filter(e => !e.isFloater && !e.inTraining);
     const errors = [];
 
-    // Process each week
     for (const week of weeks) {
-      // Shuffle engineers each week so different people get first pick
-      const shuffledEngineers = shuffleArray(coreEngineers);
-
-      for (const engineer of shuffledEngineers) {
-        // Special handling for fixed off days
-        if (engineer.fixedOffDays) {
-          for (const day of week) {
-            const dayOfWeek = day.getDay();
-            const dateStr = toDateString(day);
-            if (engineer.fixedOffDays.includes(dayOfWeek) &&
-                schedule[engineer.id][dateStr] === null) {
-              schedule[engineer.id][dateStr] = SHIFTS.OFF;
-            }
-          }
-          continue;
-        }
+      for (const engineer of coreEngineers) {
+        if (engineer.fixedOffDays) continue; // Already handled
 
         const unavailableDays = week.filter(d =>
           schedule[engineer.id][toDateString(d)] === SHIFTS.UNAVAILABLE
         ).length;
 
-        // Count existing OFF days this week (including predetermined off)
         const existingOffDays = week.filter(d =>
           schedule[engineer.id][toDateString(d)] === SHIFTS.OFF
         );
@@ -269,14 +469,12 @@ export class Scheduler {
           }
         }
 
-        // If we already have 2+ consecutive OFF days, skip
         if (hasConsecutiveOff && existingOffDays.length >= 2) continue;
 
-        // How many more OFF days do we need?
-        const neededOff = Math.max(0, 2 - existingOffDays.length);
-        if (neededOff === 0 && hasConsecutiveOff) continue;
+        // OFF reservation was disrupted - try to repair with consecutive pair
+        const neededOff = Math.max(0, MAX_OFF_PER_WEEK - existingOffDays.length);
 
-        // Get slots that can be set to OFF
+        // Look for consecutive pair among null/unassigned slots
         const availableForOff = week.filter(d => {
           const dateStr = toDateString(d);
           const shift = schedule[engineer.id][dateStr];
@@ -284,8 +482,6 @@ export class Scheduler {
                  (shift !== SHIFTS.UNAVAILABLE && shift !== SHIFTS.OFF);
         });
 
-        // Find best consecutive pair for OFF days
-        // IMPORTANT: AVOID weekends to maintain weekend coverage
         let bestPair = null;
         let bestScore = -Infinity;
 
@@ -298,41 +494,33 @@ export class Scheduler {
 
           let score = 0;
 
-          // PENALIZE weekends - we need people working weekends
           if (isWeekend(day1)) score -= 15;
           if (isWeekend(day2)) score -= 15;
 
-          // Only allow weekend OFF if coverage would still be met
           if (isWeekend(day1) && !this.wouldMaintainWeekendCoverage(schedule, engineer.id, day1, coreEngineers)) {
-            score -= 100; // Strong penalty - would break coverage
+            score -= 100;
           }
           if (isWeekend(day2) && !this.wouldMaintainWeekendCoverage(schedule, engineer.id, day2, coreEngineers)) {
             score -= 100;
           }
 
-          // Prefer holidays (they still need less coverage)
           if (this.isHoliday(day1, engineer.state)) score += 5;
           if (this.isHoliday(day2, engineer.state)) score += 5;
 
-          // Strongly prefer null/unassigned slots over overriding existing shifts
           const shift1 = schedule[engineer.id][toDateString(day1)];
           const shift2 = schedule[engineer.id][toDateString(day2)];
           if (shift1 === null || shift1 === undefined) score += 8;
           if (shift2 === null || shift2 === undefined) score += 8;
-
-          // Prefer if already has one OFF day adjacent
           if (shift1 === SHIFTS.OFF || shift2 === SHIFTS.OFF) score += 12;
 
-          // Prefer mid-week days (Tue-Thu) for OFF
           const dow1 = day1.getDay();
           const dow2 = day2.getDay();
           if (dow1 >= 2 && dow1 <= 4) score += 3;
           if (dow2 >= 2 && dow2 <= 4) score += 3;
 
-          // Spread OFF days: penalize if too many engineers already off on these days
           const offCount1 = this.countOffOnDay(schedule, coreEngineers, toDateString(day1));
           const offCount2 = this.countOffOnDay(schedule, coreEngineers, toDateString(day2));
-          score -= (offCount1 + offCount2) * 3; // Fewer people off = better
+          score -= (offCount1 + offCount2) * 3;
 
           if (score > bestScore) {
             bestScore = score;
@@ -343,57 +531,13 @@ export class Scheduler {
         if (bestPair) {
           schedule[engineer.id][toDateString(bestPair[0])] = SHIFTS.OFF;
           schedule[engineer.id][toDateString(bestPair[1])] = SHIFTS.OFF;
-        } else if (neededOff > 0) {
-          // No consecutive pair found - try non-consecutive as fallback
-          const unassigned = week.filter(d => {
-            const dateStr = toDateString(d);
-            const shift = schedule[engineer.id][dateStr];
-            return shift === null || shift === undefined;
-          });
-
-          const sorted = shuffleArray([...unassigned]).sort((a, b) => {
-            let aScore = isWeekend(a) ? -10 : 0; // AVOID weekends
-            let bScore = isWeekend(b) ? -10 : 0;
-            aScore += this.isHoliday(a, engineer.state) ? 5 : 0;
-            bScore += this.isHoliday(b, engineer.state) ? 5 : 0;
-            aScore -= this.countOffOnDay(schedule, coreEngineers, toDateString(a)) * 3;
-            bScore -= this.countOffOnDay(schedule, coreEngineers, toDateString(b)) * 3;
-            return bScore - aScore;
-          });
-
-          const needed = 2 - existingOffDays.length;
-          for (let i = 0; i < Math.min(needed, sorted.length); i++) {
-            schedule[engineer.id][toDateString(sorted[i])] = SHIFTS.OFF;
-          }
-        }
-
-        // Verify result
-        const finalOffDays = week.filter(d =>
-          schedule[engineer.id][toDateString(d)] === SHIFTS.OFF
-        );
-
-        let hasFinalConsecutive = false;
-        for (let i = 0; i < finalOffDays.length - 1; i++) {
-          const diff = Math.abs(finalOffDays[i + 1].getTime() - finalOffDays[i].getTime()) / (1000 * 60 * 60 * 24);
-          if (diff === 1) {
-            hasFinalConsecutive = true;
-            break;
-          }
-        }
-
-        if (!hasFinalConsecutive && finalOffDays.length < 2 && unavailableDays === 0) {
+        } else if (neededOff > 0 && unavailableDays === 0) {
+          // No consecutive pair possible - report as error, do NOT fall back to non-consecutive
           errors.push({
             type: 'off_day_violation',
             engineer: engineer.name,
             week: toDateString(week[0]),
-            message: `${engineer.name} has only ${finalOffDays.length} Off days in week starting ${toDateString(week[0])}`
-          });
-        } else if (!hasFinalConsecutive && finalOffDays.length >= 2) {
-          errors.push({
-            type: 'non_consecutive_off',
-            engineer: engineer.name,
-            week: toDateString(week[0]),
-            message: `${engineer.name} has ${finalOffDays.length} Off days but not consecutive in week starting ${toDateString(week[0])}`
+            message: `${engineer.name} cannot get 2 consecutive OFF days in week starting ${toDateString(week[0])}`
           });
         }
       }
@@ -403,9 +547,13 @@ export class Scheduler {
   }
 
   /**
-   * Validate the complete schedule
+   * Validate the schedule (complete or partial)
+   * @param {Object} schedule - The schedule to validate
+   * @param {Object} options - Validation options
+   * @param {boolean} options.partial - If true, skip OFF day checks (for incremental validation)
    */
-  validateSchedule(schedule) {
+  validateSchedule(schedule, options = {}) {
+    const { partial = false } = options;
     const days = this.getDays();
     const weeks = this.getWeeksInMonth();
     const errors = [];
@@ -441,6 +589,49 @@ export class Scheduler {
     for (const engineer of this.engineers) {
       const violations = validateScheduleCompliance(schedule, engineer.id, days);
       errors.push(...violations);
+
+      // Also check cross-month consecutive work days
+      const trailingWorkDays = this.getPrevMonthTrailingWorkDays(engineer.id);
+      if (trailingWorkDays > 0) {
+        let currentStreak = trailingWorkDays;
+        for (const day of days) {
+          const dateStr = toDateString(day);
+          const shift = schedule[engineer.id]?.[dateStr];
+          if (shift && shift !== SHIFTS.OFF && shift !== SHIFTS.UNAVAILABLE) {
+            currentStreak++;
+            if (currentStreak > ArbZG.MAX_CONSECUTIVE_WORK_DAYS) {
+              errors.push({
+                type: 'ARBZG_CONSECUTIVE_DAYS_CROSS_MONTH',
+                severity: 'critical',
+                law: '§11 ArbZG',
+                message: `${engineer.name} has ${currentStreak} consecutive work days across month boundary (max ${ArbZG.MAX_CONSECUTIVE_WORK_DAYS})`,
+                date: dateStr
+              });
+              break; // Only report once per engineer
+            }
+          } else {
+            break; // Streak broken
+          }
+        }
+      }
+
+      // Check transition from last day of previous month to first day of this month
+      const prevTail = this.prevMonthTail[engineer.id];
+      if (prevTail && prevTail.length > 0 && days.length > 0) {
+        const lastPrevShift = prevTail[prevTail.length - 1].shift;
+        const firstDateStr = toDateString(days[0]);
+        const firstShift = schedule[engineer.id]?.[firstDateStr];
+        const violation = getTransitionViolation(lastPrevShift, firstShift);
+        if (violation) {
+          errors.push({
+            type: 'transition_violation_cross_month',
+            engineer: engineer.name,
+            date: firstDateStr,
+            law: violation.law,
+            message: `${engineer.name}: ${lastPrevShift} → ${firstShift} across month boundary on ${firstDateStr} - ${violation.reason}`
+          });
+        }
+      }
     }
 
     // 3. Check floater rules
@@ -741,9 +932,9 @@ export class Scheduler {
               const overShift = schedule[over.id]?.[dateStr];
               if (!overShift || overShift === SHIFTS.OFF || overShift === SHIFTS.UNAVAILABLE) continue;
 
-              // Check if underworked can take this shift
+              // Check if underworked can take this shift (including cross-month boundary)
               const prevDateStr = toDateString(getPreviousDay(day));
-              const prevShift = schedule[under.id]?.[prevDateStr];
+              const prevShift = this.getShiftWithPrevMonth(schedule, under.id, prevDateStr);
               const violation = getTransitionViolation(prevShift, overShift);
 
               if (!violation) {
@@ -866,9 +1057,10 @@ export class Scheduler {
       }
     }
 
-    // 2. Check for consecutive work days > 6
+    // 2. Check for consecutive work days > 6 (including previous month's trailing days)
     for (const engineer of this.engineers) {
-      let consecutiveCount = 0;
+      // Start with previous month's trailing work days
+      let consecutiveCount = this.getPrevMonthTrailingWorkDays(engineer.id);
       let streakStart = null;
 
       for (const day of days) {
@@ -899,8 +1091,38 @@ export class Scheduler {
       }
     }
 
-    // 3. Check transition violations
+    // 3. Check transition violations (including cross-month boundary for day 0)
     for (const engineer of this.engineers) {
+      // Check transition from previous month's last day to first day of this month
+      if (days.length > 0) {
+        const firstDateStr = toDateString(days[0]);
+        const firstShift = schedule[engineer.id]?.[firstDateStr];
+        const prevMonthLastDateStr = toDateString(getPreviousDay(days[0]));
+        const prevMonthLastShift = this.getShiftWithPrevMonth(schedule, engineer.id, prevMonthLastDateStr);
+
+        if (prevMonthLastShift) {
+          const crossViolation = getTransitionViolation(prevMonthLastShift, firstShift);
+          if (crossViolation) {
+            const compatible = this.getCompatibleShifts(null, prevMonthLastShift);
+            if (compatible.length > 0 && compatible[0] !== firstShift) {
+              schedule[engineer.id][firstDateStr] = compatible[0];
+              fixes.push({
+                engineer: engineer.name,
+                action: 'transition_fix_cross_month',
+                message: `Changed ${firstDateStr} from ${firstShift} to ${compatible[0]} for ${engineer.name} to fix cross-month ${prevMonthLastShift}→${firstShift} violation`
+              });
+            } else {
+              schedule[engineer.id][firstDateStr] = SHIFTS.OFF;
+              fixes.push({
+                engineer: engineer.name,
+                action: 'transition_fix_cross_month_off',
+                message: `Changed ${firstDateStr} to OFF for ${engineer.name} to fix cross-month ${prevMonthLastShift}→${firstShift} violation`
+              });
+            }
+          }
+        }
+      }
+
       for (let i = 1; i < days.length; i++) {
         const prevDateStr = toDateString(days[i - 1]);
         const currDateStr = toDateString(days[i]);
@@ -1043,15 +1265,16 @@ export class Scheduler {
               const currentValue = filled[engineer.id][dateStr];
               if (currentValue !== null && currentValue !== undefined) return false;
 
-              // Check transition validity
+              // Check transition validity (including cross-month boundary)
               const prevDateStr = toDateString(getPreviousDay(day));
-              const prevShift = filled[engineer.id]?.[prevDateStr];
+              const prevShift = this.getShiftWithPrevMonth(filled, engineer.id, prevDateStr);
               const violation = getTransitionViolation(prevShift, shift);
               if (violation) return false;
 
-              // Check consecutive work days
+              // Check consecutive work days (including previous month's trailing days)
               let consecutive = 0;
-              for (let i = days.indexOf(day) - 1; i >= 0 && consecutive < 6; i--) {
+              const dayIdx = days.indexOf(day);
+              for (let i = dayIdx - 1; i >= 0 && consecutive < 6; i--) {
                 const checkDateStr = toDateString(days[i]);
                 const checkShift = filled[engineer.id]?.[checkDateStr];
                 if (checkShift && checkShift !== SHIFTS.OFF && checkShift !== SHIFTS.UNAVAILABLE) {
@@ -1059,6 +1282,10 @@ export class Scheduler {
                 } else {
                   break;
                 }
+              }
+              // If we reached the start of the month without a break, add previous month trailing days
+              if (dayIdx - consecutive <= 0 && consecutive < 6) {
+                consecutive += this.getPrevMonthTrailingWorkDays(engineer.id);
               }
               if (consecutive >= 5) return false;
 
@@ -1118,13 +1345,13 @@ export class Scheduler {
           const current = schedule[engineer.id]?.[dateStr];
           if (current !== null && current !== undefined) return false;
 
-          // Check transition validity
+          // Check transition validity (including cross-month boundary)
           const prevDateStr = toDateString(getPreviousDay(day));
-          const prevShift = schedule[engineer.id]?.[prevDateStr];
+          const prevShift = this.getShiftWithPrevMonth(schedule, engineer.id, prevDateStr);
           const violation = getTransitionViolation(prevShift, shift);
           if (violation) return false;
 
-          // Check consecutive work days
+          // Check consecutive work days (including previous month's trailing days)
           let consecutive = 0;
           const dayIndex = days.findIndex(d => toDateString(d) === dateStr);
           for (let i = dayIndex - 1; i >= 0 && consecutive < 6; i--) {
@@ -1136,7 +1363,18 @@ export class Scheduler {
               break;
             }
           }
+          // If we reached the start of the month without a break, add previous month trailing days
+          if (dayIndex - consecutive <= 0 && consecutive < 6) {
+            consecutive += this.getPrevMonthTrailingWorkDays(engineer.id);
+          }
           if (consecutive >= 5) return false;
+
+          // CRITICAL: Check if assigning this shift would make it impossible
+          // to get 2 consecutive OFF days this week
+          const testSchedule = { ...schedule };
+          if (!testSchedule[engineer.id]) testSchedule[engineer.id] = {};
+          testSchedule[engineer.id] = { ...testSchedule[engineer.id], [dateStr]: shift };
+          if (!this.canStillGetConsecutiveOff(testSchedule, engineer.id, week)) return false;
 
           return true;
         }));
@@ -1200,11 +1438,22 @@ export class Scheduler {
   }
 
   /**
-   * Main solve function - Week-by-Week Generation
-   * Generates week 1 with full constraints, then copies template to subsequent weeks.
-   * Always produces a complete schedule, even if constraints are violated.
-   * Returns success:true if no errors, success:false with errors and the
-   * best-available schedule if constraints could not be fully satisfied.
+   * Main solve function - Week-by-Week Generation with OFF-First Strategy
+   * CRITICAL CHANGE: OFF days are reserved BEFORE shift assignment to prevent
+   * situations where all slots are consumed by shifts, leaving no room for OFF days.
+   *
+   * Pipeline order:
+   * 1. Initialize schedule (unavailable days)
+   * 2. Reserve OFF days (lock 2 consecutive per engineer per week)
+   * 3. Assign training shifts
+   * 4. Assign night shifts (2-week cohort blocks)
+   * 5. Week-by-week day shift assignment
+   * 6. Verify/repair OFF days
+   * 7. Add floaters
+   * 8. Fill remaining nulls
+   * 9. Balance workload
+   * 10. Rationality check
+   * 11. Final validation
    */
   solve() {
     this.violations = [];
@@ -1229,11 +1478,22 @@ export class Scheduler {
     // Step 1: Initialize schedule with unavailable days
     let schedule = this.initializeSchedule();
 
-    // Step 2: Assign training engineers (entire month)
+    // Step 2: RESERVE OFF DAYS FIRST (new critical step)
+    // This prevents shift assignment from consuming all available slots
+    const reserveResult = this.reserveOffDays(schedule);
+    schedule = reserveResult.schedule;
+    if (reserveResult.errors.length > 0) {
+      collectedErrors.push(...reserveResult.errors);
+    }
+
+    // Step 3: Assign training engineers (entire month)
     schedule = this.assignTrainingShifts(schedule);
 
-    // Step 3: Assign night shifts (entire month - uses 2-week cohort blocks)
-    const nightResult = this.nightStrategy.execute(schedule, coreEngineers, days, weeks);
+    // Step 4: Assign night shifts (entire month - uses 2-week cohort blocks)
+    // Pass prevMonthTail for cross-month context
+    const nightResult = this.nightStrategy.execute(
+      schedule, coreEngineers, days, weeks, this.prevMonthTail
+    );
     if (nightResult.schedule) {
       schedule = nightResult.schedule;
     }
@@ -1242,14 +1502,24 @@ export class Scheduler {
     }
     this.warnings.push(...(nightResult.warnings || []));
 
-    // Step 4: Week-by-Week Generation for day shifts
+    // Incremental validation after night shifts
+    const postNightValidation = this.validateSchedule(schedule, { partial: true });
+    if (!postNightValidation.valid) {
+      this.warnings.push({
+        type: 'incremental_validation',
+        step: 'after_night_shifts',
+        issues: postNightValidation.errors.length
+      });
+    }
+
+    // Step 5: Week-by-Week Generation for day shifts
     for (let weekIndex = 0; weekIndex < weeks.length; weekIndex++) {
       if (weekIndex > 0) {
         // Copy template from previous week before solving
         schedule = this.copyWeekTemplate(schedule, coreEngineers, weeks[weekIndex - 1], weeks[weekIndex]);
       }
 
-      // Solve this week (fills in remaining slots)
+      // Solve this week (fills in remaining slots, respects reserved OFF days)
       const weekResult = this.solveWeek(schedule, weekIndex, weeks, coreEngineers, days);
       schedule = weekResult.schedule;
       if (weekResult.errors.length > 0) {
@@ -1257,27 +1527,48 @@ export class Scheduler {
       }
     }
 
-    // Step 5: Assign OFF days (ensures 2 consecutive per week)
+    // Incremental validation after day shifts
+    const postDayValidation = this.validateSchedule(schedule, { partial: true });
+    if (!postDayValidation.valid) {
+      this.warnings.push({
+        type: 'incremental_validation',
+        step: 'after_day_shifts',
+        issues: postDayValidation.errors.length
+      });
+    }
+
+    // Step 6: Verify/repair OFF days (ensures 2 consecutive per week survived)
     const offResult = this.assignOffDays(schedule);
     schedule = offResult.schedule;
     if (offResult.errors.length > 0) {
-      this.warnings.push(...offResult.errors.map(e => ({ ...e, demoted: true })));
+      // OFF day violations are now HARD errors, not warnings
+      collectedErrors.push(...offResult.errors);
     }
 
-    // Step 6: Add floaters
+    // Step 7: Add floaters
     const floaterResult = this.floaterStrategy.execute(schedule, this.engineers, days, weeks);
     schedule = floaterResult.schedule;
     this.warnings.push(...(floaterResult.warnings || []));
 
-    // Step 7: Fill any remaining null slots intelligently
+    // Step 8: Fill any remaining null slots intelligently
     schedule = this.fillNullSlots(schedule);
 
-    // Step 8: Balance workload
+    // Incremental validation after filling nulls
+    const postFillValidation = this.validateSchedule(schedule, { partial: true });
+    if (!postFillValidation.valid) {
+      this.warnings.push({
+        type: 'incremental_validation',
+        step: 'after_fill_nulls',
+        issues: postFillValidation.errors.length
+      });
+    }
+
+    // Step 9: Balance workload
     const workloadResult = this.balanceWorkload(schedule, this.engineers, weeks);
     schedule = workloadResult.schedule;
     this.warnings.push(...workloadResult.warnings);
 
-    // Step 9: Rationality check - final pass to fix any remaining issues
+    // Step 10: Rationality check - final pass to fix any remaining issues
     const rationalityResult = this.rationalityCheck(schedule);
     schedule = rationalityResult.schedule;
     if (rationalityResult.fixes.length > 0) {
@@ -1289,7 +1580,7 @@ export class Scheduler {
     }
     this.warnings.push(...rationalityResult.warnings);
 
-    // Step 10: Validate final schedule
+    // Step 11: Final validation
     const validation = this.validateSchedule(schedule);
     const allErrors = [...collectedErrors, ...(validation.valid ? [] : validation.errors)];
 
@@ -1302,7 +1593,7 @@ export class Scheduler {
         schedule,
         warnings: this.warnings,
         stats: this.stats,
-        version: '3.0.0'
+        version: '3.1.0'
       };
     }
 
@@ -1317,7 +1608,7 @@ export class Scheduler {
       warnings: this.warnings,
       stats: this.stats,
       canManualEdit: true,
-      version: '3.0.0'
+      version: '3.1.0'
     };
   }
 

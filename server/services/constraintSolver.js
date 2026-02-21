@@ -103,7 +103,7 @@ const SHIFT_CONSISTENCY_GROUPS = {
 const NIGHT_CONSISTENCY_WEEKS = 2;
 
 // Maximum iterations for schedule generation
-const MAX_ITERATIONS = 100;
+const MAX_ITERATIONS = 1000;
 
 /**
  * Shuffle array using Fisher-Yates algorithm

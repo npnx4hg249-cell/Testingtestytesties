@@ -124,11 +124,33 @@ export class NightShiftStrategy {
   }
 
   /**
+   * Get shift from previous month tail for cross-month boundary checks
+   */
+  getPrevMonthShift(prevMonthTail, engineerId, dateStr) {
+    const engineerTail = prevMonthTail?.[engineerId];
+    if (!engineerTail || engineerTail.length === 0) return null;
+
+    // Find shift for this date in prev month tail
+    const entry = engineerTail.find(e => e.date === dateStr);
+    return entry?.shift || null;
+  }
+
+  /**
+   * Get the last shift from previous month for an engineer
+   */
+  getLastPrevMonthShift(prevMonthTail, engineerId) {
+    const engineerTail = prevMonthTail?.[engineerId];
+    if (!engineerTail || engineerTail.length === 0) return null;
+    return engineerTail[engineerTail.length - 1]?.shift || null;
+  }
+
+  /**
    * Assign night shifts for a block
    */
-  assignNightShiftsForBlock(schedule, cohort, block, days) {
+  assignNightShiftsForBlock(schedule, cohort, block, days, prevMonthTail = {}) {
     const errors = [];
     const assignments = [];
+    const firstDayOfMonth = days[0] ? toDateString(days[0]) : null;
 
     for (const day of block.days) {
       const dateStr = toDateString(day);
@@ -139,7 +161,7 @@ export class NightShiftStrategy {
       for (const engineer of cohort) {
         if (assigned >= this.preferredEngineers) break;
 
-        // Check current state
+        // Check current state (skip if already assigned, including reserved OFF)
         const currentValue = schedule[engineer.id]?.[dateStr];
         if (currentValue !== null && currentValue !== undefined) continue;
 
@@ -149,9 +171,15 @@ export class NightShiftStrategy {
         // Check preference
         if (!this.canWorkNight(engineer, isWknd)) continue;
 
-        // Check transition from previous day
+        // Check transition from previous day (including cross-month boundary)
         const prevDateStr = toDateString(getPreviousDay(day));
-        const prevShift = schedule[engineer.id]?.[prevDateStr];
+        let prevShift = schedule[engineer.id]?.[prevDateStr];
+
+        // If this is the first day of month, check previous month's last shift
+        if (dateStr === firstDayOfMonth && prevShift === undefined) {
+          prevShift = this.getLastPrevMonthShift(prevMonthTail, engineer.id);
+        }
+
         const violation = getTransitionViolation(prevShift, SHIFTS.NIGHT);
         if (violation) continue;
 
@@ -194,8 +222,13 @@ export class NightShiftStrategy {
 
   /**
    * Execute night shift strategy
+   * @param {Object} schedule - Current schedule state
+   * @param {Array} engineers - All engineers
+   * @param {Array} days - All days in the month
+   * @param {Array} weeks - Weeks grouped
+   * @param {Object} prevMonthTail - Previous month's last 6 days per engineer for cross-month checks
    */
-  execute(schedule, engineers, days, weeks) {
+  execute(schedule, engineers, days, weeks, prevMonthTail = {}) {
     const eligible = this.getEligibleEngineers(engineers);
     const errors = [];
     const warnings = [];
@@ -222,7 +255,7 @@ export class NightShiftStrategy {
         });
       }
 
-      const result = this.assignNightShiftsForBlock(schedule, cohort, block, days);
+      const result = this.assignNightShiftsForBlock(schedule, cohort, block, days, prevMonthTail);
       errors.push(...result.errors);
 
       // Update previous cohort for rotation

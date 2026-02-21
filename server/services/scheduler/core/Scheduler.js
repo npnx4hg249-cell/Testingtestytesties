@@ -1561,9 +1561,10 @@ export class Scheduler {
    * Pipeline: Initialize → Training → Night shifts → Day shifts → OFF days → Floaters →
    *           Fill nulls → Balance → Rationality check → Validate
    *
-   * OFF days are assigned AFTER shifts because the template-copying system needs
-   * shift assignments in place first. The assignOffDays step then finds the best
-   * consecutive pair for each engineer, preferring null/unassigned slots.
+   * Each week is solved independently by solveWeek. Shift pattern consistency is
+   * maintained via the scoring system (consistency bonus for matching previous week's
+   * dominant shift group) rather than rigid template copying, which caused coverage
+   * failures when Night cohorts rotated or engineers had varying availability.
    */
   solve() {
     this.violations = [];
@@ -1605,13 +1606,8 @@ export class Scheduler {
     this.warnings.push(...(nightResult.warnings || []));
 
     // Step 4: Week-by-Week Generation for day shifts
+    // Each week solved independently - consistency maintained via scoring bonus
     for (let weekIndex = 0; weekIndex < weeks.length; weekIndex++) {
-      if (weekIndex > 0) {
-        // Copy template from previous week before solving
-        schedule = this.copyWeekTemplate(schedule, coreEngineers, weeks[weekIndex - 1], weeks[weekIndex]);
-      }
-
-      // Solve this week (fills in remaining slots)
       const weekResult = this.solveWeek(schedule, weekIndex, weeks, coreEngineers, days);
       schedule = weekResult.schedule;
       if (weekResult.errors.length > 0) {

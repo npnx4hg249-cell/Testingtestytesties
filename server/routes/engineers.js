@@ -43,7 +43,7 @@ router.get('/', authenticate, (req, res) => {
 
   let engineers = active === 'true'
     ? getActiveEngineers()
-    : getAll('engineers');
+    : getAll('users');
 
   // Don't return sensitive data
   engineers = engineers.map(e => ({
@@ -75,7 +75,7 @@ router.get('/states', (req, res) => {
  * Get engineer by ID
  */
 router.get('/:id', authenticate, (req, res) => {
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({
@@ -112,7 +112,7 @@ router.post('/', authenticate, requireManager, (req, res) => {
   }
 
   // Check email uniqueness across engineers and users
-  const existingEngineer = getAll('engineers').find(e =>
+  const existingEngineer = getAll('users').find(e =>
     e.email && e.email.toLowerCase() === email.toLowerCase()
   );
   if (existingEngineer) {
@@ -169,7 +169,7 @@ router.post('/', authenticate, requireManager, (req, res) => {
  * Update an engineer
  */
 router.put('/:id', authenticate, requireManager, (req, res) => {
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({
@@ -181,7 +181,7 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
 
   // Check email uniqueness if email is being changed
   if (email && email.toLowerCase() !== (engineer.email || '').toLowerCase()) {
-    const existingEngineer = getAll('engineers').find(e =>
+    const existingEngineer = getAll('users').find(e =>
       e.id !== req.params.id &&
       e.email && e.email.toLowerCase() === email.toLowerCase()
     );
@@ -215,7 +215,7 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
     });
   }
 
-  const updated = update('engineers', req.params.id, {
+  const updated = update('users', req.params.id, {
     name: name !== undefined ? name : engineer.name,
     email: email !== undefined ? email : engineer.email,
     tier: tier !== undefined ? tier : engineer.tier,
@@ -234,7 +234,7 @@ router.put('/:id', authenticate, requireManager, (req, res) => {
  * Delete (deactivate) an engineer
  */
 router.delete('/:id', authenticate, requireManager, (req, res) => {
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({
@@ -243,7 +243,7 @@ router.delete('/:id', authenticate, requireManager, (req, res) => {
   }
 
   // Soft delete - just deactivate
-  update('engineers', req.params.id, { isActive: false });
+  update('users', req.params.id, { isActive: false });
 
   res.json({ message: 'Engineer deactivated successfully' });
 });
@@ -253,7 +253,7 @@ router.delete('/:id', authenticate, requireManager, (req, res) => {
  * Reset password for an engineer's user account (admin only)
  */
 router.post('/:id/reset-password', authenticate, requireAdmin, async (req, res) => {
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({
@@ -326,7 +326,7 @@ router.post('/:id/reset-password', authenticate, requireAdmin, async (req, res) 
  * Create a user account for an engineer (admin only)
  */
 router.post('/:id/create-user', authenticate, requireAdmin, async (req, res) => {
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({
@@ -429,7 +429,7 @@ router.put('/:id/preferences', authenticate, (req, res) => {
     });
   }
 
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({
@@ -451,7 +451,7 @@ router.put('/:id/preferences', authenticate, (req, res) => {
     });
   }
 
-  const updated = update('engineers', req.params.id, { preferences });
+  const updated = update('users', req.params.id, { preferences });
 
   res.json({
     id: updated.id,
@@ -472,7 +472,7 @@ router.put('/:id/unavailable', authenticate, (req, res) => {
     });
   }
 
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({
@@ -496,7 +496,7 @@ router.put('/:id/unavailable', authenticate, (req, res) => {
     });
   }
 
-  const updated = update('engineers', req.params.id, { unavailableDays });
+  const updated = update('users', req.params.id, { unavailableDays });
 
   res.json({
     id: updated.id,
@@ -510,7 +510,7 @@ router.put('/:id/unavailable', authenticate, (req, res) => {
  * Get holidays applicable to an engineer based on their state
  */
 router.get('/:id/holidays', authenticate, (req, res) => {
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({
@@ -542,7 +542,7 @@ router.get('/:id/holidays', authenticate, (req, res) => {
  * Duplicate an existing engineer (managers/admins only)
  */
 router.post('/:id/duplicate', authenticate, requireManager, (req, res) => {
-  const sourceEngineer = getById('engineers', req.params.id);
+  const sourceEngineer = getById('users', req.params.id);
 
   if (!sourceEngineer) {
     return res.status(404).json({
@@ -913,7 +913,7 @@ router.post('/bulk-upload-excel', authenticate, requireManager, (req, res) => {
  * Export all engineers as CSV
  */
 router.get('/export/csv', authenticate, requireManager, (req, res) => {
-  const engineers = getAll('engineers');
+  const engineers = getAll('users');
 
   const header = 'name,email,tier,isFloater,state,preferences,isActive';
   const rows = engineers.map(e => {
@@ -933,7 +933,7 @@ router.get('/export/csv', authenticate, requireManager, (req, res) => {
  * Export all engineers as Excel file
  */
 router.get('/export/excel', authenticate, requireManager, (req, res) => {
-  const engineers = getAll('engineers');
+  const engineers = getAll('users');
 
   const data = engineers.map(e => ({
     Name: e.name,
@@ -970,7 +970,7 @@ router.get('/:id/unavailable-dates', authenticate, (req, res) => {
     });
   }
 
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({ error: 'Engineer not found' });
@@ -1007,7 +1007,7 @@ router.post('/:id/unavailable-dates', authenticate, (req, res) => {
     });
   }
 
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({ error: 'Engineer not found' });
@@ -1050,7 +1050,7 @@ router.post('/:id/unavailable-dates', authenticate, (req, res) => {
     currentSources[item.date] = 'manual';
   }
 
-  const updated = update('engineers', req.params.id, {
+  const updated = update('users', req.params.id, {
     unavailableDays: [...currentDays].sort(),
     unavailableTypes: currentTypes,
     unavailableNotes: currentNotes,
@@ -1077,7 +1077,7 @@ router.delete('/:id/unavailable-dates', authenticate, (req, res) => {
     });
   }
 
-  const engineer = getById('engineers', req.params.id);
+  const engineer = getById('users', req.params.id);
 
   if (!engineer) {
     return res.status(404).json({ error: 'Engineer not found' });
@@ -1107,7 +1107,7 @@ router.delete('/:id/unavailable-dates', authenticate, (req, res) => {
     }
   }
 
-  const updated = update('engineers', req.params.id, {
+  const updated = update('users', req.params.id, {
     unavailableDays: [...currentDays].sort(),
     unavailableTypes: currentTypes,
     unavailableNotes: currentNotes,

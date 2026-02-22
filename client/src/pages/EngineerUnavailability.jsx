@@ -174,7 +174,8 @@ function EngineerUnavailability() {
               if (unavailInfo) {
                 bgColor = unavailInfo.type === 'sick' ? '#ffcdd2' :
                           unavailInfo.type === 'vacation' ? '#c8e6c9' :
-                          unavailInfo.type === 'personal' ? '#b3e5fc' : '#e0e0e0';
+                          unavailInfo.type === 'personal' ? '#b3e5fc' :
+                          unavailInfo.type === 'predetermined_off' ? '#ce93d8' : '#e0e0e0';
               } else if (isSelected) {
                 bgColor = '#bbdefb';
               }
@@ -203,7 +204,8 @@ function EngineerUnavailability() {
                     <div style={{ fontSize: 10, marginTop: 2 }}>
                       {unavailInfo.type === 'sick' ? 'S' :
                        unavailInfo.type === 'vacation' ? 'V' :
-                       unavailInfo.type === 'personal' ? 'P' : 'U'}
+                       unavailInfo.type === 'personal' ? 'P' :
+                       unavailInfo.type === 'predetermined_off' ? 'D' : 'U'}
                     </div>
                   )}
                 </div>
@@ -271,7 +273,7 @@ function EngineerUnavailability() {
               <option value="vacation">Vacation</option>
               <option value="sick">Sick Leave</option>
               <option value="personal">Personal</option>
-              <option value="predetermined_off">Predetermined Off</option>
+              <option value="predetermined_off">Pre Scheduled Day Off</option>
             </select>
 
             <button
@@ -310,6 +312,10 @@ function EngineerUnavailability() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 20, height: 20, background: '#b3e5fc', border: '1px solid #ddd' }}></div>
             <span>Personal (P)</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 20, height: 20, background: '#ce93d8', border: '1px solid #ddd' }}></div>
+            <span>Pre Scheduled Day Off (D)</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 20, height: 20, background: '#e0e0e0', border: '1px solid #ddd' }}></div>

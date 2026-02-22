@@ -223,7 +223,9 @@ function shuffleArray(arr) {
   return result;
 }
 
-const MAX_GENERATE_ITERATIONS = 1000;
+// Reduced from 1000 to 100 to prevent 504 Gateway Timeout
+// With the improved scheduler algorithm, 100 iterations is usually sufficient
+const MAX_GENERATE_ITERATIONS = 100;
 
 /**
  * POST /api/schedules/generate

@@ -202,9 +202,9 @@ export class DayShiftStrategy {
       // Must have valid transition
       if (!this.isValidTransition(schedule, engineer.id, date, shift)) return false;
 
-      // Check consecutive days limit (already worked 5 days in a row = at limit)
+      // Check consecutive days limit - German law allows up to 6 consecutive work days
       const consecutive = this.getConsecutiveWorkDays(schedule, engineer.id, getPreviousDay(date), days);
-      if (consecutive >= 5) return false;
+      if (consecutive >= 6) return false;
 
       return true;
     });

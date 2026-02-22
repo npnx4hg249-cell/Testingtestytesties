@@ -115,7 +115,75 @@ weekend: { Early: min 2, Late: min 2, Morning: min 1, Night: min 2 max 3 }
 
 ---
 
+## Round 2 Analysis (v3.3.0 → v3.4.0)
+
+### Results After Interleaved OFF Fix:
+- Errors reduced from ~70 to 25
+- Coverage now works in weeks 2+ (main fix successful)
+- Remaining errors are scattered shortfalls, not total collapses
+
+### Remaining Error Categories:
+| Shift | # Errors | Pattern |
+|-------|----------|---------|
+| Early | 10 | Short by 1-2 on most weekdays |
+| Late | 6 | Short by 1 on scattered days |
+| Morning | 5 | 0 coverage on several days |
+| Night | 4 | Short by 1 on transition days |
+
+### Root Causes Found:
+
+1. **Consecutive check `>= 5` too conservative** (all 3 files)
+   - German law: `ArbZG.MAX_CONSECUTIVE_WORK_DAYS = 6`
+   - Code blocked at 5: `if (consecutive >= 5) return false;`
+   - Should be `>= 6` — gives ~20% more scheduling capacity
+   - Affected: `solveWeek()`, `fillNullSlots()`, `DayShiftStrategy.js`
+
+2. **TARGET_SHIFTS_PER_WEEK = 5 hard cap blocks coverage**
+   - `if (weekShifts >= TARGET_SHIFTS_PER_WEEK) continue;`
+   - Engineers at 5 shifts skipped even when coverage isn't met
+   - Fix: Add overflow pass allowing up to 6 shifts (legal max)
+
+3. **fillNullSlots() only fills +1 per shift gap**
+   - `break;` after first assignment per shift
+   - Shift needing 3 with 1 only gets bumped to 2
+   - Fix: Remove break, loop until minRequired met
+
+4. **Night cohort too small (3) for handling unavailability**
+   - When 1 of 3 is unavailable, coverage drops to 1
+   - Fix: Select cohort of 4, cap daily assignment at 3
+
+### Fixes Applied (v3.4.0):
+- Changed consecutive threshold: `>= 5` → `>= 6` (3 locations)
+- Added overflow pass in solveWeek (allows up to 6 shifts/week for coverage)
+- Fixed fillNullSlots to fill all gaps, not just +1
+- Increased night cohort size from 3 to 4 (cap stays at 3/day)
+
+---
+
+## Round 3: Predetermined OFF Fix (v3.4.0 → v3.5.0)
+
+### Bug Found:
+When an engineer has 2+ predetermined OFF days that aren't consecutive (e.g., Tue + Thu),
+`assignOffDaysForWeek()` would fall through the guard clauses and add a FULL PAIR of OFF
+days on top, giving the engineer 4 OFF days instead of 2.
+
+**Root cause**: Guard clause was `if (hasConsecutiveOff && existingOffDays.length >= 2)` —
+requires BOTH conditions true. With non-consecutive predetermined OFF, `hasConsecutiveOff`
+is false, so the guard fails.
+
+### Fix:
+Restructured OFF assignment into 3 clear cases:
+1. **Have 2+ OFF (including predetermined)**: Done — skip entirely. Just warn if non-consecutive.
+2. **Have 1 OFF (e.g., 1 predetermined)**: Add 1 more, prefer adjacent for consecutiveness.
+3. **Have 0 OFF**: Find best consecutive pair (existing logic).
+
+Also part of this commit: consecutive threshold fix, overflow pass, fillNullSlots gap fill,
+and night cohort resilience from Round 2.
+
+---
+
 ## Commits History:
+- `a4d46f0` - Fix consecutive work day check by interleaving OFF assignment per week
 - `249f65e` - Remove template copying, solve each week independently
 - `3989068` - Fix Night shift duplication and add max coverage enforcement
 - `8dbe3a6` - Revert OFF-first pipeline, fix partial week handling and coverage

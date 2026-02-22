@@ -28,6 +28,8 @@ export class NightShiftStrategy {
     this.minEngineers = options.minEngineers || NIGHT_SHIFT_CONFIG.minEngineers;
     this.consistencyWeeks = options.consistencyWeeks || NIGHT_SHIFT_CONFIG.consistencyWeeks;
     this.preferredEngineers = options.preferredEngineers || 3;
+    // Select extra cohort members to ensure min coverage when some are unavailable
+    this.cohortSize = options.cohortSize || 4;
   }
 
   /**
@@ -75,7 +77,8 @@ export class NightShiftStrategy {
    */
   selectCohort(eligibleEngineers, block, schedule, previousCohort = []) {
     const cohort = [];
-    const cohortSize = Math.min(this.preferredEngineers, eligibleEngineers.length);
+    // Select larger cohort to ensure min coverage when some members are unavailable
+    const cohortSize = Math.min(this.cohortSize, eligibleEngineers.length);
 
     // Score engineers based on:
     // 1. Availability during the block

@@ -2,7 +2,7 @@
  * Main Schedule Generator
  * Orchestrates all scheduling components for 24/7 shift schedule generation
  *
- * Version: 3.3.0
+ * Version: 3.4.0
  * Week-by-week generation with interleaved OFF assignment
  * - Shifts and OFF days assigned per-week to fix consecutive work day check
  * - Consistency maintained via scoring bonus (not template copying)
@@ -528,12 +528,24 @@ export class Scheduler {
         }
       }
 
-      // If we already have 2+ consecutive OFF days, skip
-      if (hasConsecutiveOff && existingOffDays.length >= 2) continue;
+      // If we already have 2+ OFF days (including predetermined), we're done.
+      // Predetermined OFF days are hard-coded for the individual and count as their days off.
+      // Don't add more OFF on top — just warn if they're not consecutive.
+      if (existingOffDays.length >= 2) {
+        if (!hasConsecutiveOff && unavailableDays === 0) {
+          errors.push({
+            type: 'non_consecutive_off',
+            engineer: engineer.name,
+            week: toDateString(week[0]),
+            message: `${engineer.name} has ${existingOffDays.length} Off days but not consecutive in week starting ${toDateString(week[0])}`
+          });
+        }
+        continue;
+      }
 
-      // How many more OFF days do we need?
+      // How many more OFF days do we need? (0, 1, or 2)
       const neededOff = Math.max(0, 2 - existingOffDays.length);
-      if (neededOff === 0 && hasConsecutiveOff) continue;
+      if (neededOff === 0) continue;
 
       // Get slots that can be set to OFF (prefer null/unassigned, but allow overriding shifts)
       const availableForOff = week.filter(d => {
@@ -543,85 +555,129 @@ export class Scheduler {
                (shift !== SHIFTS.UNAVAILABLE && shift !== SHIFTS.OFF);
       });
 
-      // Find best consecutive pair for OFF days
-      let bestPair = null;
-      let bestScore = -Infinity;
+      // CASE A: Need 1 more OFF (have 1 existing, e.g. predetermined)
+      // Try to place adjacent to existing OFF for consecutiveness
+      if (neededOff === 1 && existingOffDays.length === 1) {
+        const existingOff = existingOffDays[0];
+        let bestDay = null;
+        let bestScore = -Infinity;
 
-      for (let i = 0; i < availableForOff.length - 1; i++) {
-        const day1 = availableForOff[i];
-        const day2 = availableForOff[i + 1];
+        for (const d of availableForOff) {
+          const dayDiff = Math.abs(d.getTime() - existingOff.getTime()) / (1000 * 60 * 60 * 24);
+          let score = 0;
 
-        const diff = Math.abs(day2.getTime() - day1.getTime()) / (1000 * 60 * 60 * 24);
-        if (diff !== 1) continue;
+          // Strongly prefer adjacent to existing OFF (makes them consecutive)
+          if (dayDiff === 1) score += 50;
 
-        let score = 0;
+          // Penalize weekends
+          if (isWeekend(d)) score -= 15;
+          if (isWeekend(d) && !this.wouldMaintainWeekendCoverage(schedule, engineer.id, d, coreEngineers)) {
+            score -= 100;
+          }
 
-        // PENALIZE weekends - we need people working weekends
-        if (isWeekend(day1)) score -= 15;
-        if (isWeekend(day2)) score -= 15;
+          // Prefer null slots over overriding work shifts
+          const shift = schedule[engineer.id][toDateString(d)];
+          if (shift === null || shift === undefined) score += 8;
 
-        // Only allow weekend OFF if coverage would still be met
-        if (isWeekend(day1) && !this.wouldMaintainWeekendCoverage(schedule, engineer.id, day1, coreEngineers)) {
-          score -= 100;
+          // Prefer holidays
+          if (this.isHoliday(d, engineer.state)) score += 5;
+
+          // Prefer mid-week
+          const dow = d.getDay();
+          if (dow >= 2 && dow <= 4) score += 3;
+
+          // Spread OFF days
+          const offCount = this.countOffOnDay(schedule, coreEngineers, toDateString(d));
+          score -= offCount * 3;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestDay = d;
+          }
         }
-        if (isWeekend(day2) && !this.wouldMaintainWeekendCoverage(schedule, engineer.id, day2, coreEngineers)) {
-          score -= 100;
-        }
 
-        // Prefer holidays
-        if (this.isHoliday(day1, engineer.state)) score += 5;
-        if (this.isHoliday(day2, engineer.state)) score += 5;
-
-        // Strongly prefer null/unassigned slots over overriding existing shifts
-        const shift1 = schedule[engineer.id][toDateString(day1)];
-        const shift2 = schedule[engineer.id][toDateString(day2)];
-        if (shift1 === null || shift1 === undefined) score += 8;
-        if (shift2 === null || shift2 === undefined) score += 8;
-
-        // Prefer if already has one OFF day adjacent
-        if (shift1 === SHIFTS.OFF || shift2 === SHIFTS.OFF) score += 12;
-
-        // Prefer mid-week days (Tue-Thu) for OFF
-        const dow1 = day1.getDay();
-        const dow2 = day2.getDay();
-        if (dow1 >= 2 && dow1 <= 4) score += 3;
-        if (dow2 >= 2 && dow2 <= 4) score += 3;
-
-        // Spread OFF days: penalize if too many engineers already off on these days
-        const offCount1 = this.countOffOnDay(schedule, coreEngineers, toDateString(day1));
-        const offCount2 = this.countOffOnDay(schedule, coreEngineers, toDateString(day2));
-        score -= (offCount1 + offCount2) * 3;
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestPair = [day1, day2];
+        if (bestDay) {
+          schedule[engineer.id][toDateString(bestDay)] = SHIFTS.OFF;
         }
       }
+      // CASE B: Need 2 OFF days (have 0 existing)
+      // Find best consecutive pair
+      else if (neededOff === 2) {
+        let bestPair = null;
+        let bestScore = -Infinity;
 
-      if (bestPair) {
-        schedule[engineer.id][toDateString(bestPair[0])] = SHIFTS.OFF;
-        schedule[engineer.id][toDateString(bestPair[1])] = SHIFTS.OFF;
-      } else if (neededOff > 0) {
-        // No consecutive pair found - fall back to non-consecutive (better than nothing)
-        const unassigned = week.filter(d => {
-          const dateStr = toDateString(d);
-          const shift = schedule[engineer.id][dateStr];
-          return shift === null || shift === undefined;
-        });
+        for (let i = 0; i < availableForOff.length - 1; i++) {
+          const day1 = availableForOff[i];
+          const day2 = availableForOff[i + 1];
 
-        const sorted = shuffleArray([...unassigned]).sort((a, b) => {
-          let aScore = isWeekend(a) ? -10 : 0;
-          let bScore = isWeekend(b) ? -10 : 0;
-          aScore += this.isHoliday(a, engineer.state) ? 5 : 0;
-          bScore += this.isHoliday(b, engineer.state) ? 5 : 0;
-          aScore -= this.countOffOnDay(schedule, coreEngineers, toDateString(a)) * 3;
-          bScore -= this.countOffOnDay(schedule, coreEngineers, toDateString(b)) * 3;
-          return bScore - aScore;
-        });
+          const diff = Math.abs(day2.getTime() - day1.getTime()) / (1000 * 60 * 60 * 24);
+          if (diff !== 1) continue;
 
-        const needed = 2 - existingOffDays.length;
-        for (let i = 0; i < Math.min(needed, sorted.length); i++) {
-          schedule[engineer.id][toDateString(sorted[i])] = SHIFTS.OFF;
+          let score = 0;
+
+          // PENALIZE weekends - we need people working weekends
+          if (isWeekend(day1)) score -= 15;
+          if (isWeekend(day2)) score -= 15;
+
+          // Only allow weekend OFF if coverage would still be met
+          if (isWeekend(day1) && !this.wouldMaintainWeekendCoverage(schedule, engineer.id, day1, coreEngineers)) {
+            score -= 100;
+          }
+          if (isWeekend(day2) && !this.wouldMaintainWeekendCoverage(schedule, engineer.id, day2, coreEngineers)) {
+            score -= 100;
+          }
+
+          // Prefer holidays
+          if (this.isHoliday(day1, engineer.state)) score += 5;
+          if (this.isHoliday(day2, engineer.state)) score += 5;
+
+          // Strongly prefer null/unassigned slots over overriding existing shifts
+          const shift1 = schedule[engineer.id][toDateString(day1)];
+          const shift2 = schedule[engineer.id][toDateString(day2)];
+          if (shift1 === null || shift1 === undefined) score += 8;
+          if (shift2 === null || shift2 === undefined) score += 8;
+
+          // Prefer mid-week days (Tue-Thu) for OFF
+          const dow1 = day1.getDay();
+          const dow2 = day2.getDay();
+          if (dow1 >= 2 && dow1 <= 4) score += 3;
+          if (dow2 >= 2 && dow2 <= 4) score += 3;
+
+          // Spread OFF days: penalize if too many engineers already off on these days
+          const offCount1 = this.countOffOnDay(schedule, coreEngineers, toDateString(day1));
+          const offCount2 = this.countOffOnDay(schedule, coreEngineers, toDateString(day2));
+          score -= (offCount1 + offCount2) * 3;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestPair = [day1, day2];
+          }
+        }
+
+        if (bestPair) {
+          schedule[engineer.id][toDateString(bestPair[0])] = SHIFTS.OFF;
+          schedule[engineer.id][toDateString(bestPair[1])] = SHIFTS.OFF;
+        } else {
+          // No consecutive pair found - fall back to non-consecutive (better than nothing)
+          const unassigned = week.filter(d => {
+            const dateStr = toDateString(d);
+            const shift = schedule[engineer.id][dateStr];
+            return shift === null || shift === undefined;
+          });
+
+          const sorted = shuffleArray([...unassigned]).sort((a, b) => {
+            let aScore = isWeekend(a) ? -10 : 0;
+            let bScore = isWeekend(b) ? -10 : 0;
+            aScore += this.isHoliday(a, engineer.state) ? 5 : 0;
+            bScore += this.isHoliday(b, engineer.state) ? 5 : 0;
+            aScore -= this.countOffOnDay(schedule, coreEngineers, toDateString(a)) * 3;
+            bScore -= this.countOffOnDay(schedule, coreEngineers, toDateString(b)) * 3;
+            return bScore - aScore;
+          });
+
+          for (let i = 0; i < Math.min(neededOff, sorted.length); i++) {
+            schedule[engineer.id][toDateString(sorted[i])] = SHIFTS.OFF;
+          }
         }
       }
 
@@ -1725,7 +1781,7 @@ export class Scheduler {
         schedule,
         warnings: this.warnings,
         stats: this.stats,
-        version: '3.3.0'
+        version: '3.4.0'
       };
     }
 
@@ -1740,7 +1796,7 @@ export class Scheduler {
       warnings: this.warnings,
       stats: this.stats,
       canManualEdit: true,
-      version: '3.3.0'
+      version: '3.4.0'
     };
   }
 

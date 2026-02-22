@@ -160,6 +160,28 @@ weekend: { Early: min 2, Late: min 2, Morning: min 1, Night: min 2 max 3 }
 
 ---
 
+## Round 3: Predetermined OFF Fix (v3.4.0 → v3.5.0)
+
+### Bug Found:
+When an engineer has 2+ predetermined OFF days that aren't consecutive (e.g., Tue + Thu),
+`assignOffDaysForWeek()` would fall through the guard clauses and add a FULL PAIR of OFF
+days on top, giving the engineer 4 OFF days instead of 2.
+
+**Root cause**: Guard clause was `if (hasConsecutiveOff && existingOffDays.length >= 2)` —
+requires BOTH conditions true. With non-consecutive predetermined OFF, `hasConsecutiveOff`
+is false, so the guard fails.
+
+### Fix:
+Restructured OFF assignment into 3 clear cases:
+1. **Have 2+ OFF (including predetermined)**: Done — skip entirely. Just warn if non-consecutive.
+2. **Have 1 OFF (e.g., 1 predetermined)**: Add 1 more, prefer adjacent for consecutiveness.
+3. **Have 0 OFF**: Find best consecutive pair (existing logic).
+
+Also part of this commit: consecutive threshold fix, overflow pass, fillNullSlots gap fill,
+and night cohort resilience from Round 2.
+
+---
+
 ## Commits History:
 - `a4d46f0` - Fix consecutive work day check by interleaving OFF assignment per week
 - `249f65e` - Remove template copying, solve each week independently

@@ -207,6 +207,10 @@ but used standard limit (5) when short by just 1. Changed to always use legal ma
 ---
 
 ## Commits History:
+- `4abbf7f` - Fix Pre Scheduled Day Off data flow and improve coverage overflow (v3.5.0)
+- `eac57d3` - Fix predetermined OFF data flow and rename to Pre Scheduled Day Off
+- `f5ef42d` - Fix predetermined OFF counting and prevent excess OFF assignment
+- `5559d55` - Refine scheduler: fix consecutive threshold, overflow pass, and night cohort
 - `a4d46f0` - Fix consecutive work day check by interleaving OFF assignment per week
 - `249f65e` - Remove template copying, solve each week independently
 - `3989068` - Fix Night shift duplication and add max coverage enforcement

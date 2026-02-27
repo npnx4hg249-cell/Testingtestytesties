@@ -231,20 +231,10 @@ export class ShiftScheduler {
     if (engineer.preferences && engineer.preferences.length > 0) {
       // If date is provided, check for weekend-specific preferences
       if (date && this.isWeekend(date)) {
-        // Check for weekend-specific preference first
+        // For weekends, MUST have explicit Weekend* preference
+        // No Weekend* preferences = cannot work weekends at all
         const weekendPref = `Weekend${shift}`;
-        if (engineer.preferences.includes(weekendPref)) {
-          return true;
-        }
-        // If no weekend-specific preference, check if they have regular shift preference
-        // but NOT if they have weekend preferences defined (meaning they explicitly chose weekend shifts)
-        const hasAnyWeekendPref = engineer.preferences.some(p => p.startsWith('Weekend'));
-        if (hasAnyWeekendPref) {
-          // They have weekend preferences defined, so only allow if weekend shift is in preferences
-          return false;
-        }
-        // No weekend preferences defined, fall back to regular preferences
-        return engineer.preferences.includes(shift);
+        return engineer.preferences.includes(weekendPref);
       }
       // Weekday - check regular preferences
       return engineer.preferences.includes(shift);

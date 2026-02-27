@@ -52,16 +52,11 @@ export class FloaterStrategy {
       const isWknd = isWeekend(date);
 
       if (isWknd) {
+        // For weekends, MUST have explicit Weekend* preference
+        // No Weekend* preferences = cannot work weekends at all
         const weekendPref = `Weekend${shift}`;
         if (!floater.preferences.includes(weekendPref)) {
-          // Check if has any weekend prefs
-          const hasWeekendPrefs = floater.preferences.some(p => p.startsWith('Weekend'));
-          if (hasWeekendPrefs) {
-            return false;
-          }
-          if (!floater.preferences.includes(shift)) {
-            return false;
-          }
+          return false;
         }
       } else if (!floater.preferences.includes(shift)) {
         return false;

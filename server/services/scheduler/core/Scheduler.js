@@ -201,21 +201,21 @@ export class Scheduler {
       const isWknd = isWeekend(date);
 
       if (isWknd) {
+        // For weekends, MUST have explicit Weekend* preference
+        // No Weekend* preferences = cannot work weekends at all
         const weekendPref = `Weekend${shift}`;
         if (engineer.preferences.includes(weekendPref)) {
           return true;
         }
-
-        // If has any weekend preferences defined, must match
-        const hasWeekendPrefs = engineer.preferences.some(p => p.startsWith('Weekend'));
-        if (hasWeekendPrefs) {
-          return false;
-        }
+        // No Weekend* preference for this shift = can't work it on weekends
+        return false;
       }
 
+      // Weekday: check regular shift preferences
       return engineer.preferences.includes(shift);
     }
 
+    // No preferences set = can work any shift
     return true;
   }
 
@@ -1442,6 +1442,60 @@ export class Scheduler {
       }
     }
 
+    // 4. Check and fix 4+ consecutive OFF days across the entire schedule
+    for (const engineer of this.engineers) {
+      if (engineer.isFloater || engineer.inTraining) continue;
+
+      let consecutiveOff = 0;
+      let offStreakStart = null;
+
+      for (let i = 0; i < days.length; i++) {
+        const day = days[i];
+        const dateStr = toDateString(day);
+        const shift = schedule[engineer.id]?.[dateStr];
+
+        if (shift === SHIFTS.OFF) {
+          if (consecutiveOff === 0) offStreakStart = i;
+          consecutiveOff++;
+
+          // If we have 4+ consecutive OFF, try to fix by converting one to a work shift
+          if (consecutiveOff >= 4) {
+            const streakMid = Math.floor((offStreakStart + i) / 2);
+            const midDay = days[streakMid];
+            const midDateStr = toDateString(midDay);
+
+            // Try to assign a shift (prefer Morning as overflow)
+            const shiftsToTry = [SHIFTS.MORNING, SHIFTS.EARLY, SHIFTS.LATE];
+            for (const tryShift of shiftsToTry) {
+              if (!this.canWorkShift(engineer, tryShift, midDay)) continue;
+
+              const prevDateStr = toDateString(getPreviousDay(midDay));
+              const prevShift = schedule[engineer.id]?.[prevDateStr];
+              const nextDateStr = streakMid + 1 < days.length ? toDateString(days[streakMid + 1]) : null;
+              const nextShift = nextDateStr ? schedule[engineer.id]?.[nextDateStr] : null;
+
+              const prevViolation = getTransitionViolation(prevShift, tryShift);
+              const nextViolation = nextShift ? getTransitionViolation(tryShift, nextShift) : null;
+
+              if (!prevViolation && !nextViolation) {
+                schedule[engineer.id][midDateStr] = tryShift;
+                fixes.push({
+                  engineer: engineer.name,
+                  action: 'break_off_streak',
+                  message: `Changed ${midDateStr} from OFF to ${tryShift} for ${engineer.name} to break ${consecutiveOff}+ consecutive OFF days`
+                });
+                consecutiveOff = 0;
+                break;
+              }
+            }
+          }
+        } else {
+          consecutiveOff = 0;
+          offStreakStart = null;
+        }
+      }
+    }
+
     return { schedule, fixes, warnings };
   }
 
@@ -1680,7 +1734,60 @@ export class Scheduler {
       }
     }
 
-    // Third pass: fill remaining null slots with OFF
+    // Third pass: Use Morning as overflow for engineers who still need shifts
+    for (const week of weeks) {
+      const shiftCounts = new Map();
+      for (const engineer of coreEngineers) {
+        shiftCounts.set(engineer.id, this.getWeekShiftCount(filled, engineer.id, week));
+      }
+
+      for (const engineer of coreEngineers) {
+        const currentShifts = shiftCounts.get(engineer.id);
+        const unavailCount = week.filter(d =>
+          filled[engineer.id]?.[toDateString(d)] === SHIFTS.UNAVAILABLE
+        ).length;
+
+        // Target: 5 shifts per week for full weeks, proportional for partial
+        const targetShifts = Math.max(0, Math.min(5, week.length - unavailCount - 2));
+
+        if (currentShifts >= targetShifts) continue;
+
+        // Find null slots and assign to Morning (overflow)
+        for (const day of week) {
+          if (shiftCounts.get(engineer.id) >= targetShifts) break;
+
+          const dateStr = toDateString(day);
+          const currentValue = filled[engineer.id][dateStr];
+          if (currentValue !== null && currentValue !== undefined) continue;
+
+          // Check if can work Morning
+          if (!this.canWorkShift(engineer, SHIFTS.MORNING, day)) continue;
+
+          const prevDateStr = toDateString(getPreviousDay(day));
+          const prevShift = this.getShiftWithPrevMonth(filled, engineer.id, prevDateStr);
+          const violation = getTransitionViolation(prevShift, SHIFTS.MORNING);
+          if (violation) continue;
+
+          // Check consecutive work days
+          let consecutive = 0;
+          const dayIdx = days.indexOf(day);
+          for (let i = dayIdx - 1; i >= 0 && consecutive < 6; i--) {
+            const checkShift = filled[engineer.id]?.[toDateString(days[i])];
+            if (checkShift && checkShift !== SHIFTS.OFF && checkShift !== SHIFTS.UNAVAILABLE) {
+              consecutive++;
+            } else {
+              break;
+            }
+          }
+          if (consecutive >= 6) continue;
+
+          filled[engineer.id][dateStr] = SHIFTS.MORNING;
+          shiftCounts.set(engineer.id, shiftCounts.get(engineer.id) + 1);
+        }
+      }
+    }
+
+    // Fourth pass: fill remaining null slots with OFF
     for (const engineer of this.engineers) {
       for (const day of days) {
         const dateStr = toDateString(day);

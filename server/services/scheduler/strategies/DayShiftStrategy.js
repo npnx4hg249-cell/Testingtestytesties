@@ -143,18 +143,17 @@ export class DayShiftStrategy {
       const isWknd = isWeekend(date);
 
       if (isWknd) {
+        // For weekends, MUST have explicit Weekend* preference
+        // No Weekend* preferences = cannot work weekends at all
         const weekendPref = `Weekend${shift}`;
         if (engineer.preferences.includes(weekendPref)) {
           return true;
         }
-
-        // If has any weekend preferences defined, must match
-        const hasWeekendPrefs = engineer.preferences.some(p => p.startsWith('Weekend'));
-        if (hasWeekendPrefs) {
-          return false;
-        }
+        // No Weekend* preference for this shift = can't work it on weekends
+        return false;
       }
 
+      // Weekday: check regular shift preferences
       return engineer.preferences.includes(shift);
     }
 

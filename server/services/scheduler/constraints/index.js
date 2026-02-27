@@ -174,18 +174,13 @@ export function createPreferenceConstraint(engineerId, dateStr, preferences, dat
 
       // Check weekend-specific preferences
       if (isWeekend(date)) {
+        // For weekends, MUST have explicit Weekend* preference
+        // No Weekend* preferences = cannot work weekends at all
         const weekendPref = `Weekend${shift}`;
-        if (preferences.includes(weekendPref)) {
-          return true;
-        }
-        // If has any weekend preferences, must match
-        const hasWeekendPrefs = preferences.some(p => p.startsWith('Weekend'));
-        if (hasWeekendPrefs) {
-          return false;
-        }
+        return preferences.includes(weekendPref);
       }
 
-      // Check regular preferences
+      // Weekday: check regular preferences
       return preferences.includes(shift);
     },
     'hard'

@@ -215,9 +215,9 @@ export class NightShiftStrategy {
     }
 
     if (isWeekend) {
-      return engineer.preferences.includes('WeekendNight') ||
-             (!engineer.preferences.some(p => p.startsWith('Weekend')) &&
-              engineer.preferences.includes(SHIFTS.NIGHT));
+      // For weekends, MUST have explicit WeekendNight preference
+      // No Weekend* preferences = cannot work weekends at all
+      return engineer.preferences.includes('WeekendNight');
     }
 
     return engineer.preferences.includes(SHIFTS.NIGHT);

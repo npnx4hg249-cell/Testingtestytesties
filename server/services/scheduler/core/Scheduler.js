@@ -11,7 +11,7 @@
 
 import { SHIFTS, DEFAULT_COVERAGE, COLORS, SHIFT_TIMES, SHIFT_GROUPS } from '../config/defaults.js';
 import { ArbZG, validateScheduleCompliance, getTransitionViolation } from '../rules/GermanLaborLaws.js';
-import { toDateString, getMonthDays, getWeeks, isWeekend, format as formatDate, getPreviousDay } from '../utils/DateUtils.js';
+import { toDateString, getMonthDays, getWeeks, isWeekend, format as formatDate, getPreviousDay, getNextDay } from '../utils/DateUtils.js';
 import { format } from 'date-fns';
 
 import { NightShiftStrategy } from '../strategies/NightShiftStrategy.js';
@@ -655,6 +655,14 @@ export class Scheduler {
         let bestPair = null;
         let bestScore = -Infinity;
 
+        // Get previous and next week's last/first day OFF status to prevent clustering
+        const weekFirstDay = week[0];
+        const weekLastDay = week[week.length - 1];
+        const prevDay = getPreviousDay(weekFirstDay);
+        const nextDay = getNextDay(weekLastDay);
+        const prevDayOff = schedule[engineer.id]?.[toDateString(prevDay)] === SHIFTS.OFF;
+        const nextDayOff = schedule[engineer.id]?.[toDateString(nextDay)] === SHIFTS.OFF;
+
         for (let i = 0; i < availableForOff.length - 1; i++) {
           const day1 = availableForOff[i];
           const day2 = availableForOff[i + 1];
@@ -663,6 +671,17 @@ export class Scheduler {
           if (diff !== 1) continue;
 
           let score = 0;
+
+          // HEAVILY penalize OFF at week boundaries if it would create 3+ consecutive OFF days
+          const isDay1FirstOfWeek = toDateString(day1) === toDateString(weekFirstDay);
+          const isDay2LastOfWeek = toDateString(day2) === toDateString(weekLastDay);
+
+          if (isDay1FirstOfWeek && prevDayOff) {
+            score -= 200; // Would create 3+ consecutive with prev week
+          }
+          if (isDay2LastOfWeek && nextDayOff) {
+            score -= 200; // Would create 3+ consecutive with next week
+          }
 
           // PENALIZE weekends - we need people working weekends
           if (isWeekend(day1)) score -= 15;
@@ -1120,8 +1139,8 @@ export class Scheduler {
    */
   getCompatibleShifts(pattern, prevShift) {
     // Exclude Night - handled separately by NightShiftStrategy
-    // Priority: Early, Morning (rest-restricted), Late
-    const allShifts = [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE];
+    // Priority: Early, Late first; Morning is overflow (deprioritized)
+    const allShifts = [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING];
     const compatible = [];
 
     for (const shift of allShifts) {
@@ -1197,6 +1216,9 @@ export class Scheduler {
               const prevDateStr = toDateString(getPreviousDay(day));
               const prevShift = this.getShiftWithPrevMonth(schedule, under.id, prevDateStr);
               const violation = getTransitionViolation(prevShift, overShift);
+
+              // CRITICAL: Check preferences before swapping
+              if (!this.canWorkShift(under, overShift, day)) continue;
 
               if (!violation) {
                 // Swap: give shift to underworked, give OFF to overworked
@@ -1289,6 +1311,9 @@ export class Scheduler {
                   const prevShift = schedule[engineer.id]?.[prevDateStr];
                   const violation = getTransitionViolation(prevShift, shift2);
 
+                  // Check preference before swapping
+                  if (!this.canWorkShift(engineer, shift2, swapDay)) continue;
+
                   if (!violation) {
                     schedule[engineer.id][swapDateStr] = shift2;
                     schedule[engineer.id][dateStr2] = SHIFTS.OFF;
@@ -1365,12 +1390,14 @@ export class Scheduler {
           const crossViolation = getTransitionViolation(prevMonthLastShift, firstShift);
           if (crossViolation) {
             const compatible = this.getCompatibleShifts(null, prevMonthLastShift);
-            if (compatible.length > 0 && compatible[0] !== firstShift) {
-              schedule[engineer.id][firstDateStr] = compatible[0];
+            // Filter compatible shifts by engineer preferences
+            const preferenceCompatible = compatible.filter(s => this.canWorkShift(engineer, s, days[0]));
+            if (preferenceCompatible.length > 0 && preferenceCompatible[0] !== firstShift) {
+              schedule[engineer.id][firstDateStr] = preferenceCompatible[0];
               fixes.push({
                 engineer: engineer.name,
                 action: 'transition_fix_cross_month',
-                message: `Changed ${firstDateStr} from ${firstShift} to ${compatible[0]} for ${engineer.name} to fix cross-month ${prevMonthLastShift}→${firstShift} violation`
+                message: `Changed ${firstDateStr} from ${firstShift} to ${preferenceCompatible[0]} for ${engineer.name} to fix cross-month ${prevMonthLastShift}→${firstShift} violation`
               });
             } else {
               schedule[engineer.id][firstDateStr] = SHIFTS.OFF;
@@ -1394,12 +1421,14 @@ export class Scheduler {
         if (violation) {
           // Try to fix by changing current shift to OFF or a compatible shift
           const compatible = this.getCompatibleShifts(null, prevShift);
-          if (compatible.length > 0 && compatible[0] !== currShift) {
-            schedule[engineer.id][currDateStr] = compatible[0];
+          // Filter compatible shifts by engineer preferences
+          const preferenceCompatible = compatible.filter(s => this.canWorkShift(engineer, s, days[i]));
+          if (preferenceCompatible.length > 0 && preferenceCompatible[0] !== currShift) {
+            schedule[engineer.id][currDateStr] = preferenceCompatible[0];
             fixes.push({
               engineer: engineer.name,
               action: 'transition_fix',
-              message: `Changed ${currDateStr} from ${currShift} to ${compatible[0]} for ${engineer.name} to fix ${prevShift}→${currShift} violation`
+              message: `Changed ${currDateStr} from ${currShift} to ${preferenceCompatible[0]} for ${engineer.name} to fix ${prevShift}→${currShift} violation`
             });
           } else {
             schedule[engineer.id][currDateStr] = SHIFTS.OFF;
@@ -1510,7 +1539,8 @@ export class Scheduler {
         const isWknd = isWeekend(day);
         const dayCoverage = isWknd ? this.coverage.weekend : this.coverage.weekday;
 
-        for (const shift of [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE]) {
+        // Priority: Early, Late first; Morning is overflow (deprioritized)
+        for (const shift of [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING]) {
           const currentCoverage = coreEngineers.filter(e =>
             filled[e.id][dateStr] === shift
           ).length;
@@ -1612,8 +1642,21 @@ export class Scheduler {
           const isWknd = isWeekend(day);
           const dayCoverage = isWknd ? this.coverage.weekend : this.coverage.weekday;
 
-          // Find a shift they can work
-          for (const shift of [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE]) {
+          // Check current coverage for prioritization - Morning is overflow only
+          const earlyCoverage = coreEngineers.filter(e => filled[e.id][dateStr] === SHIFTS.EARLY).length;
+          const lateCoverage = coreEngineers.filter(e => filled[e.id][dateStr] === SHIFTS.LATE).length;
+          const earlyPreferred = dayCoverage[SHIFTS.EARLY]?.preferred || dayCoverage[SHIFTS.EARLY]?.min || 3;
+          const latePreferred = dayCoverage[SHIFTS.LATE]?.preferred || dayCoverage[SHIFTS.LATE]?.min || 3;
+          const morningMin = dayCoverage[SHIFTS.MORNING]?.min || 2;
+
+          // Morning is only available if Early and Late are at preferred levels
+          const morningAvailable = earlyCoverage >= earlyPreferred && lateCoverage >= latePreferred;
+          const availableShifts = morningAvailable
+            ? [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING]
+            : [SHIFTS.EARLY, SHIFTS.LATE];
+
+          // Find a shift they can work (Early/Late preferred, Morning only if others full)
+          for (const shift of availableShifts) {
             const violation = getTransitionViolation(prevShift, shift);
             if (violation) continue;
             if (!this.canWorkShift(engineer, shift, day)) continue;
@@ -1621,10 +1664,13 @@ export class Scheduler {
             const currentCoverage = coreEngineers.filter(e =>
               filled[e.id][dateStr] === shift
             ).length;
-            const preferred = dayCoverage[shift]?.preferred || dayCoverage[shift]?.min || 3;
 
-            // Allow assignment even if at preferred, to fill engineer's schedule
-            if (currentCoverage < preferred + 1) {
+            // For Morning, only allow up to min; for Early/Late allow more
+            const maxAllowed = shift === SHIFTS.MORNING
+              ? morningMin
+              : (dayCoverage[shift]?.preferred || dayCoverage[shift]?.min || 3) + 1;
+
+            if (currentCoverage < maxAllowed) {
               filled[engineer.id][dateStr] = shift;
               shiftCounts.set(engineer.id, shiftCounts.get(engineer.id) + 1);
               break;
@@ -1666,8 +1712,8 @@ export class Scheduler {
       const isWknd = isWeekend(day);
       const dayCoverage = isWknd ? this.coverage.weekend : this.coverage.weekday;
 
-      // Check each shift for coverage gaps (Early, Morning, Late, Night)
-      for (const shift of [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE, SHIFTS.NIGHT]) {
+      // Check each shift for coverage gaps (Early, Late first, Morning deprioritized, then Night)
+      for (const shift of [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING, SHIFTS.NIGHT]) {
         const currentCoverage = coreEngineers.filter(e =>
           schedule[e.id][dateStr] === shift
         ).length;
@@ -1805,8 +1851,8 @@ export class Scheduler {
       const isWknd = isWeekend(day);
       const dayCoverage = isWknd ? this.coverage.weekend : this.coverage.weekday;
 
-      // Assign Early first, then Morning (has rest restrictions), then Late
-      for (const shift of [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE]) {
+      // Assign Early first, then Late; Morning is deprioritized (overflow only)
+      for (const shift of [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING]) {
         const minRequired = dayCoverage[shift]?.min || 2;
 
         // Get eligible engineers for this shift

@@ -134,8 +134,8 @@ export class FloaterStrategy {
         const isWknd = isWeekend(day);
         const dayCoverage = isWknd ? this.coverage.weekend : this.coverage.weekday;
 
-        // Only add floaters for Early, Morning, Late shifts
-        for (const shift of [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE]) {
+        // Only add floaters for Early, Late, Morning shifts (Morning deprioritized)
+        for (const shift of [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING]) {
           const currentCoverage = this.getCurrentCoverage(schedule, engineers, dateStr, shift);
           const preferredCoverage = dayCoverage[shift]?.preferred || dayCoverage[shift]?.min || 2;
 

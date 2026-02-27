@@ -223,9 +223,9 @@ function shuffleArray(arr) {
   return result;
 }
 
-// Reduced from 1000 to 100 to prevent 504 Gateway Timeout
-// With the improved scheduler algorithm, 100 iterations is usually sufficient
-const MAX_GENERATE_ITERATIONS = 100;
+// Increased to 250 for better exploration of solution space
+// With the improved scheduler algorithm, early stopping handles fast cases
+const MAX_GENERATE_ITERATIONS = 250;
 
 /**
  * POST /api/schedules/generate
@@ -320,9 +320,11 @@ router.post('/generate', authenticate, requireManager, (req, res) => {
     if (iteration >= 5 && bestErrorCount <= 1) break;
     if (iteration >= 15 && bestErrorCount <= 2) break;
     if (iteration >= 30 && bestErrorCount <= 3) break;
+    if (iteration >= 75 && bestErrorCount <= 4) break;
 
-    // Diminishing returns: if no improvement in many iterations, stop
-    if (iteration >= 100 && bestErrorCount <= 5) break;
+    // Extended exploration for difficult schedules
+    if (iteration >= 150 && bestErrorCount <= 5) break;
+    if (iteration >= 200 && bestErrorCount <= 6) break;
   }
 
   // No perfect solution found - save best partial schedule for manual editing
@@ -450,9 +452,11 @@ router.post('/generate-with-option', authenticate, requireManager, (req, res) =>
     if (iteration >= 5 && bestErrorCount <= 1) break;
     if (iteration >= 15 && bestErrorCount <= 2) break;
     if (iteration >= 30 && bestErrorCount <= 3) break;
+    if (iteration >= 75 && bestErrorCount <= 4) break;
 
-    // Diminishing returns
-    if (iteration >= 100 && bestErrorCount <= 5) break;
+    // Extended exploration for difficult schedules
+    if (iteration >= 150 && bestErrorCount <= 5) break;
+    if (iteration >= 200 && bestErrorCount <= 6) break;
   }
 
   // Save best partial schedule for manual editing

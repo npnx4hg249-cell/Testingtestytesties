@@ -1120,7 +1120,8 @@ export class Scheduler {
    */
   getCompatibleShifts(pattern, prevShift) {
     // Exclude Night - handled separately by NightShiftStrategy
-    const allShifts = [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING];
+    // Priority: Early, Morning (rest-restricted), Late
+    const allShifts = [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE];
     const compatible = [];
 
     for (const shift of allShifts) {
@@ -1510,8 +1511,8 @@ export class Scheduler {
         const isWknd = isWeekend(day);
         const dayCoverage = isWknd ? this.coverage.weekend : this.coverage.weekday;
 
-        // Priority: Early/Late first, Morning last
-        for (const shift of [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING]) {
+        // Priority: Early first, Morning (has rest restrictions), then Late
+        for (const shift of [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE]) {
           // Count current coverage for this shift
           const currentCoverage = coreEngineers.filter(e =>
             filled[e.id][dateStr] === shift
@@ -1606,8 +1607,8 @@ export class Scheduler {
       const isWknd = isWeekend(day);
       const dayCoverage = isWknd ? this.coverage.weekend : this.coverage.weekday;
 
-      // Check each shift for coverage gaps
-      for (const shift of [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING, SHIFTS.NIGHT]) {
+      // Check each shift for coverage gaps (Early, Morning, Late, Night)
+      for (const shift of [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE, SHIFTS.NIGHT]) {
         const currentCoverage = coreEngineers.filter(e =>
           schedule[e.id][dateStr] === shift
         ).length;
@@ -1745,8 +1746,8 @@ export class Scheduler {
       const isWknd = isWeekend(day);
       const dayCoverage = isWknd ? this.coverage.weekend : this.coverage.weekday;
 
-      // Assign Early and Late first (highest priority), Morning last (lowest priority)
-      for (const shift of [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING]) {
+      // Assign Early first, then Morning (has rest restrictions), then Late
+      for (const shift of [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE]) {
         const minRequired = dayCoverage[shift]?.min || 2;
 
         // Get eligible engineers for this shift

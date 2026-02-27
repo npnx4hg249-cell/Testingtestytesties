@@ -257,8 +257,9 @@ export class DayShiftStrategy {
   execute(schedule, engineers, days, weeks) {
     const errors = [];
     const warnings = [];
-    // Priority order: Early and Late first (highest priority), Morning last (lowest)
-    const dayShifts = [SHIFTS.EARLY, SHIFTS.LATE, SHIFTS.MORNING];
+    // Priority order: Early first, then Morning (which has rest restrictions), then Late
+    // Morning must come before Late because Night->Morning and Late->Morning are forbidden
+    const dayShifts = [SHIFTS.EARLY, SHIFTS.MORNING, SHIFTS.LATE];
 
     for (const day of days) {
       const dateStr = toDateString(day);
